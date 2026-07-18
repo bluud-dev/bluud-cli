@@ -21,6 +21,7 @@ describe("guidanceForCode", () => {
     expect(guidanceForCode("auth_required")).toContain("bluud login");
     expect(guidanceForCode("subscription_required")).toContain("plan");
     expect(guidanceForCode("project_locked")).toContain("read-only");
+    expect(guidanceForCode("project_limit_exceeded")).toContain("5 projects");
   });
 
   it("returns null where no hint applies", () => {

@@ -14,6 +14,7 @@ export type ErrorCode =
   | "config_error"
   | "identity_error"
   | "project_not_found"
+  | "project_limit_exceeded"
   | "subscription_required"
   | "project_locked"
   | "cancelled"
@@ -80,6 +81,8 @@ const ERROR_GUIDANCE: Record<ErrorCode, string | null> = {
   config_error: "Check permissions on ~/.bluud, then try again.",
   identity_error: "Run this inside your project directory (a git repo or any folder).",
   project_not_found: "Run `bluud` in this directory to register the project first.",
+  project_limit_exceeded:
+    "Free tier allows 5 projects. Remove one or upgrade at https://bluud.dev/settings/billing.",
   subscription_required: "This needs a paid plan. Manage it at https://bluud.dev/settings/billing.",
   project_locked:
     "This project is read-only (storage full). Free up space or upgrade to write again.",

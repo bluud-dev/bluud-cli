@@ -355,6 +355,7 @@ const KNOWN_ERROR_CODES = new Set<ErrorCode>([
   "config_error",
   "identity_error",
   "project_not_found",
+  "project_limit_exceeded",
   "subscription_required",
   "project_locked",
   "cancelled",

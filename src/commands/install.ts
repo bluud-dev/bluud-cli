@@ -13,6 +13,7 @@
 
 import pc from "picocolors";
 import os from "node:os";
+import { basename } from "node:path";
 import { requireIdentity } from "../lib/identity.js";
 import { saveAuth, saveProjectToken } from "../lib/config.js";
 import { loginWithBrowser, loginWithToken } from "../lib/auth.js";
@@ -45,7 +46,7 @@ export const installCommand: Command = {
     spinner.stop(`Project identity: ${identity.projectId}`);
 
     spinner.start("Registering project…");
-    const displayName = ctx.cwd.split("/").pop() ?? null;
+    const displayName = basename(ctx.cwd);
     const registration = await ctx.api.registerProject(identity, displayName);
     await saveProjectToken(registration.project_id, registration.token);
     spinner.stop(registration.is_new ? "Project registered." : "Project membership confirmed.");

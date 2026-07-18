@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ApiClient } from "../src/lib/api.js";
 import { CliError } from "../src/lib/error.js";
-import type { AuthSession } from "../src/types.js";
+import type { AuthSession, ProjectIdentity } from "../src/types.js";
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -35,6 +35,120 @@ describe("ApiClient", () => {
       );
     const client = new ApiClient({ baseUrl: "http://localhost:1", fetchImpl });
     await expect(client.getAccount()).rejects.toThrow("Upgrade needed");
+  });
+
+  it("registers a project with git_remote and returns the token", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      if (url.endsWith("/projects/register")) {
+        expect(body).toEqual({
+          git_remote: "github.com/owner/repo",
+          path: undefined,
+          display_name: "repo",
+        });
+        return json({
+          project_id: "a3f7c2deadbeef",
+          display_name: "repo",
+          identity_source: "git_remote",
+          token: "bluud_pt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          is_new: true,
+        });
+      }
+      return json({}, 404);
+    });
+
+    const client = new ApiClient({
+      baseUrl: "http://localhost:1",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    client.setSession({ access_token: "session", refresh_token: "refresh", token_type: "bearer" });
+
+    const identity: ProjectIdentity = {
+      projectId: "a3f7c2deadbeef",
+      identitySource: "git_remote",
+      gitRemote: "github.com/owner/repo",
+      path: "/tmp/repo",
+    };
+
+    const result = await client.registerProject(identity, "repo");
+    expect(result).toEqual({
+      project_id: "a3f7c2deadbeef",
+      display_name: "repo",
+      identity_source: "git_remote",
+      token: "bluud_pt_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      is_new: true,
+    });
+  });
+
+  it("registers a project with path fallback when no git remote", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : null;
+      if (url.endsWith("/projects/register")) {
+        expect(body).toEqual({
+          git_remote: null,
+          path: "/tmp/plain",
+          display_name: "plain",
+        });
+        return json({
+          project_id: "deadbeefcafebabe",
+          display_name: "plain",
+          identity_source: "path_hash",
+          token: "bluud_pt_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+          is_new: true,
+        });
+      }
+      return json({}, 404);
+    });
+
+    const client = new ApiClient({
+      baseUrl: "http://localhost:1",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    client.setSession({ access_token: "session", refresh_token: "refresh", token_type: "bearer" });
+
+    const identity: ProjectIdentity = {
+      projectId: "deadbeefcafebabe",
+      identitySource: "path_hash",
+      gitRemote: null,
+      path: "/tmp/plain",
+    };
+
+    const result = await client.registerProject(identity, "plain");
+    expect(result.identity_source).toBe("path_hash");
+    expect(result.project_id).toBe("deadbeefcafebabe");
+  });
+
+  it("surfaces project_limit_exceeded on registration", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/projects/register")) {
+        return json(
+          { detail: { code: "project_limit_exceeded", message: "Free tier limit reached" } },
+          403,
+        );
+      }
+      return json({}, 404);
+    });
+
+    const client = new ApiClient({
+      baseUrl: "http://localhost:1",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    client.setSession({ access_token: "session", refresh_token: "refresh", token_type: "bearer" });
+
+    const identity: ProjectIdentity = {
+      projectId: "a3f7c2deadbeef",
+      identitySource: "git_remote",
+      gitRemote: "github.com/owner/repo",
+      path: "/tmp/repo",
+    };
+
+    await expect(client.registerProject(identity, "repo")).rejects.toMatchObject({
+      code: "project_limit_exceeded",
+      message: "Free tier limit reached",
+    });
   });
 });
 

@@ -8,6 +8,7 @@ import { CliError } from "../lib/error.js";
 import { uninstallClaudeCode } from "../lib/adapters/claudecode.js";
 import { uninstallCodex } from "../lib/adapters/codex.js";
 import { uninstallGeminiCli } from "../lib/adapters/geminicli.js";
+import { uninstallAntigravity } from "../lib/adapters/antigravity.js";
 import { uninstallKimi } from "../lib/adapters/kimi.js";
 import { uninstallCline } from "../lib/adapters/cline.js";
 import type { AdapterEnv } from "../lib/adapters/types.js";
@@ -18,6 +19,7 @@ const SUPPORTED_AGENTS = [
   "claude-code",
   "codex",
   "gemini-cli",
+  "antigravity",
   "kimi-code-cli",
   "cline",
   "cursor",
@@ -30,6 +32,7 @@ const ADAPTER_UNINSTALLERS: Record<string, (env: AdapterEnv) => Promise<boolean>
   "claude-code": uninstallClaudeCode,
   codex: uninstallCodex,
   "gemini-cli": uninstallGeminiCli,
+  antigravity: uninstallAntigravity,
   "kimi-code-cli": uninstallKimi,
   cline: uninstallCline,
 };
@@ -101,6 +104,10 @@ async function removeSkillFiles(agent: string, cwd: string, home: string): Promi
     "gemini-cli": {
       project: `${cwd}/.agents/skills/bluud-memory`,
       global: `${home}/.gemini/skills/bluud-memory`,
+    },
+    antigravity: {
+      project: `${cwd}/.agents/skills/bluud-memory`,
+      global: `${home}/.gemini/antigravity/skills/bluud-memory`,
     },
     "kimi-code-cli": {
       project: `${cwd}/.agents/skills/bluud-memory`,

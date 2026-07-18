@@ -32,7 +32,7 @@ describe("kimiAdapter", () => {
     expect(await kimiAdapter.detect(env)).toBe(false);
   });
 
-  it("writes a flat [[hooks]] entry with event=SessionStart using bare `pull` (no --inject)", async () => {
+  it("writes a flat [[hooks]] entry with event=UserPromptSubmit invoking --inject (SessionStart cannot inject there)", async () => {
     const env = await makeEnv({ global: true });
     await mkdir(join(home, ".kimi-code"), { recursive: true });
 
@@ -42,19 +42,18 @@ describe("kimiAdapter", () => {
     const configPath = join(home, ".kimi-code", "config.toml");
     const content = await readFile(configPath, "utf8");
     expect(content).toContain("[[hooks]]");
-    expect(content).toContain('event = "SessionStart"');
-    expect(content).toContain('matcher = "startup"');
-    expect(content).toContain("command = '/usr/local/bin/bluud pull'");
-    expect(content).not.toContain("--inject");
+    expect(content).toContain('event = "UserPromptSubmit"');
+    expect(content).toContain("command = '/usr/local/bin/bluud pull --inject'");
+    expect(content).not.toContain('event = "SessionStart"');
   });
 
-  it("the plan description documents the observation-only limitation", async () => {
+  it("the plan description documents why UserPromptSubmit is used instead of SessionStart", async () => {
     const env = await makeEnv({ global: true });
     await mkdir(join(home, ".kimi-code"), { recursive: true });
 
     const plan = await kimiAdapter.plan(env);
-    expect(plan.actions[0].description).toContain("observation-only");
-    expect(plan.actions[0].description).toContain("cannot inject context");
+    expect(plan.actions[0].description).toContain("UserPromptSubmit");
+    expect(plan.actions[0].description).toContain("SessionStart cannot inject context");
   });
 
   it("is idempotent: re-applying does not duplicate the block", async () => {

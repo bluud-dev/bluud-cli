@@ -136,6 +136,10 @@ function resolveSkillTargetDir(agent: string, global: boolean, cwd: string): str
     "claude-code": { project: ".claude/skills", global: join(home, ".claude", "skills") },
     codex: { project: ".codex/skills", global: join(home, ".codex", "skills") },
     "gemini-cli": { project: ".agents/skills", global: join(home, ".gemini", "skills") },
+    antigravity: {
+      project: ".agents/skills",
+      global: join(home, ".gemini", "antigravity", "skills"),
+    },
     "kimi-code-cli": { project: ".agents/skills", global: join(home, ".agents", "skills") },
     cline: { project: ".agents/skills", global: join(home, ".agents", "skills") },
     cursor: { project: ".cursor/rules", global: null },

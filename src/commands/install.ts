@@ -35,6 +35,7 @@ const SUPPORTED_AGENTS = [
   "claude-code",
   "codex",
   "gemini-cli",
+  "antigravity",
   "kimi-code-cli",
   "cline",
   "cursor",

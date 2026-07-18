@@ -1,31 +1,37 @@
 /**
  * Kimi Code CLI hook adapter.
  *
- * Writes a `SessionStart` hook into `~/.kimi-code/config.toml`.
+ * Writes a `UserPromptSubmit` hook into `~/.kimi-code/config.toml`.
  *
  * Schema (verified against
- * https://moonshotai.github.io/kimi-code/en/customization/hooks):
+ * https://moonshotai.github.io/kimi-code/en/customization/hooks and
+ * https://moonshotai.github.io/kimi-code/en/configuration/config-files):
  *
  *   [[hooks]]
- *   event = "SessionStart"
- *   matcher = "startup"
- *   command = '<bluud binary> pull'
+ *   event = "UserPromptSubmit"
+ *   command = '<bluud binary> pull --inject'
  *   timeout = 30
  *
- * Kimi Code CLI's hook array is flat (one `[[hooks]]` table per hook, keyed by
- * an `event` field) rather than grouped per event name like Claude Code/Codex.
- * `matcher` only accepts "startup" | "resume" (no "clear"/"compact").
+ * Kimi Code CLI's hook array is flat (one `[[hooks]]` table per hook, keyed
+ * by an `event` field) rather than grouped per event name like Claude
+ * Code/Codex.
  *
- * IMPORTANT LIMITATION (verified against the same doc): Kimi Code CLI's
- * `SessionStart` is explicitly documented as *observation-only* — it fires
- * and forgets, and cannot inject stdout/JSON into the model's context, unlike
- * Claude Code, Codex CLI, or Gemini CLI. The command therefore runs plain
- * `bluud pull` (no `--inject`) purely to warm the local project-token/memory
- * cache; it does not deliver memory into the conversation. Actual injection on
- * Kimi is driven by the bundled `SKILL.md` instructing the agent to run
- * `bluud pull` itself, exactly as on the ~70 non-hook tools. `bluud doctor`
- * and the plan description surface this limitation explicitly so it is never
- * silently assumed to behave like the other adapters.
+ * IMPORTANT, VERIFIED CORRECTION: an earlier version of this adapter used
+ * `SessionStart`, which Kimi Code CLI documents as *observation-only* — it
+ * cannot inject stdout into the model's context. gortex's own real-world
+ * Kimi adapter (`internal/agents/kimi/adapter.go`) confirms this and instead
+ * wires its context-injection hook onto `UserPromptSubmit` ("pre-turn context
+ * injection"), which Kimi's docs confirm supports it: a `UserPromptSubmit`
+ * hook's plain stdout text "is appended to context" (unlike SessionStart,
+ * which is fire-and-forget). This adapter does the same, so memory actually
+ * reaches the model here rather than being silently dropped.
+ *
+ * The tradeoff: `UserPromptSubmit` fires on every user turn, not once per
+ * session, so `bluud pull --inject` runs (and its output is re-injected)
+ * every turn rather than only at session start. This is the only mechanism
+ * Kimi documents for automatic context injection, so it is the correct
+ * choice despite firing more often than the other adapters' SessionStart
+ * hooks.
  *
  * Only the user-level config (`~/.kimi-code/config.toml`) is documented for
  * hooks, so this adapter is a no-op in project (`--global` absent) scope.
@@ -42,7 +48,7 @@ import {
 } from "./toml.js";
 
 const ADAPTER_NAME = "kimi-code-cli";
-const MARKER_SCOPE = "session-start";
+const MARKER_SCOPE = "user-prompt-submit";
 
 export const kimiAdapter: Adapter = {
   name: ADAPTER_NAME,
@@ -65,7 +71,7 @@ export const kimiAdapter: Adapter = {
         {
           path: configPath,
           description:
-            "SessionStart hook in ~/.kimi-code/config.toml (observation-only — cannot inject context; memory pull is driven by the bundled skill instead)",
+            "UserPromptSubmit hook in ~/.kimi-code/config.toml (Kimi's SessionStart cannot inject context, so memory is re-injected on every turn instead)",
           present: existsSync(configPath),
           wouldChange,
         },
@@ -89,8 +95,7 @@ export const kimiAdapter: Adapter = {
     if (!alreadyPresent) {
       const block = [
         "[[hooks]]",
-        'event = "SessionStart"',
-        'matcher = "startup"',
+        'event = "UserPromptSubmit"',
         `command = ${tomlString(command)}`,
         "timeout = 30",
       ].join("\n");
@@ -106,7 +111,7 @@ function getConfigPath(env: AdapterEnv): string {
 }
 
 function buildHookCommand(bluudBinary: string): string {
-  return `${bluudBinary} pull`;
+  return `${bluudBinary} pull --inject`;
 }
 
 export async function uninstallKimi(env: AdapterEnv): Promise<boolean> {

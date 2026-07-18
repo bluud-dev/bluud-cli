@@ -1,0 +1,57 @@
+{
+  "name": "bluud-cli",
+  "version": "0.1.0",
+  "description": "Bluud — agent memory for this project. The npx bluud CLI installs the Bluud skill into your AI tools and keeps project memory in sync.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Bluud <hello@bluud.dev>",
+  "homepage": "https://bluud.dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bluud-dev/bluud-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bluud-dev/bluud-cli/issues"
+  },
+  "bin": {
+    "bluud": "./bin/cli.mjs"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "src/skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests bin/cli.mjs",
+    "lint:fix": "eslint src tests bin/cli.mjs --fix",
+    "format:check": "prettier --check src tests bin/cli.mjs",
+    "format": "prettier --write src tests bin/cli.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "picocolors": "^1.0.1",
+    "simple-git": "^3.25.0",
+    "xdg-basedir": "^5.1.0",
+    "yaml": "^2.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "typescript-eslint": "^7.16.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.2",
+    "tsup": "^8.1.0",
+    "typescript": "^5.5.3",
+    "vitest": "^2.0.2"
+  }
+}

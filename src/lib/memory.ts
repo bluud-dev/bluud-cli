@@ -1,0 +1,145 @@
+/**
+ * Pure helpers for memory-tree rendering and diff validation.
+ *
+ * These functions are shared between `bluud pull` and `bluud push` and are
+ * deliberately free of side effects so they are easy to unit test.
+ */
+
+import { CliError } from "./error.js";
+import type { DiffOperation, MemoryNode, MemoryTree } from "../types.js";
+
+const MAX_HEADING_DEPTH = 6;
+const QUOTA_WARNING_THRESHOLD = 0.9;
+
+/**
+ * Render a memory tree as Markdown suitable for injection into an agent's
+ * conversation context. The output is deterministic and stable: the same tree
+ * always produces the same string.
+ *
+ * Nodes are emitted in the preorder order returned by the API. Heading depth
+ * is driven by `node.depth` but capped so we never exceed H6.
+ */
+export function renderMemoryTree(tree: MemoryTree): string {
+  if (tree.nodes.length === 0) {
+    return "# Bluud project memory\n\nNo memory has been recorded for this project yet.\n";
+  }
+
+  const lines: string[] = ["# Bluud project memory", ""];
+
+  for (const node of tree.nodes) {
+    lines.push(...renderNode(node));
+  }
+
+  return lines.join("\n");
+}
+
+function renderNode(node: MemoryNode): string[] {
+  const headingLevel = Math.min(node.depth + 2, MAX_HEADING_DEPTH);
+  const prefix = "#".repeat(headingLevel);
+  const lines: string[] = ["", `${prefix} ${node.title}`];
+
+  if (node.description) {
+    lines.push("");
+    lines.push(node.description);
+  }
+
+  if (node.body) {
+    lines.push("");
+    lines.push(node.body);
+  }
+
+  return lines;
+}
+
+/**
+ * Return true when the project is near or over its quota. Pull continues to
+ * work in this state, but the user (or agent) should be warned.
+ */
+export function isQuotaWarning(tree: MemoryTree): boolean {
+  return tree.quota_usage_ratio >= QUOTA_WARNING_THRESHOLD;
+}
+
+/**
+ * Format a human-readable quota warning.
+ */
+export function formatQuotaWarning(tree: MemoryTree): string {
+  const percent = Math.round(tree.quota_usage_ratio * 100);
+  return `Project memory is at ${percent}% of the storage quota (${tree.total_size_bytes} bytes). Pulls still work, but writes may be blocked.`;
+}
+
+/**
+ * Validate and narrow an unknown value to a `DiffOperation[]`.
+ *
+ * Throws `CliError` with `code: "api_error"` when the shape is invalid so the
+ * agent gets a clear, actionable message instead of a raw 422 from the server.
+ */
+export function validateDiffOperations(raw: unknown): DiffOperation[] {
+  if (raw === null || typeof raw !== "object" || !Array.isArray((raw as { operations?: unknown }).operations)) {
+    throw new CliError("Push payload must be an object with an 'operations' array.", {
+      code: "api_error",
+    });
+  }
+
+  const { operations } = raw as { operations: unknown[] };
+  const validated: DiffOperation[] = [];
+
+  for (let i = 0; i < operations.length; i++) {
+    validated.push(validateOperation(operations[i], i));
+  }
+
+  return validated;
+}
+
+function validateOperation(op: unknown, index: number): DiffOperation {
+  if (op === null || typeof op !== "object") {
+    throw new CliError(`Operation at index ${index} must be an object.`, { code: "api_error" });
+  }
+
+  const { op: kind, id, document } = op as Record<string, unknown>;
+
+  if (kind !== "create" && kind !== "update" && kind !== "delete") {
+    throw new CliError(
+      `Operation at index ${index} has invalid 'op': expected "create", "update", or "delete" but got ${JSON.stringify(kind)}.`,
+      { code: "api_error" },
+    );
+  }
+
+  if (kind === "delete") {
+    if (typeof id !== "string" || id.length === 0) {
+      throw new CliError(`Delete operation at index ${index} requires a non-empty 'id' string.`, {
+        code: "api_error",
+      });
+    }
+    return { op: "delete", id };
+  }
+
+  // create or update
+  if (typeof document !== "string" || document.length === 0) {
+    throw new CliError(
+      `${capitalize(kind)} operation at index ${index} requires a non-empty 'document' string.`,
+      { code: "api_error" },
+    );
+  }
+
+  if (kind === "create") {
+    if (id !== undefined && (typeof id !== "string" || id.length === 0)) {
+      throw new CliError(`Create operation at index ${index} has an invalid 'id' string.`, {
+        code: "api_error",
+      });
+    }
+    return { op: "create", document, ...(id !== undefined ? { id } : {}) };
+  }
+
+  // update
+  if (typeof id !== "string" || id.length === 0) {
+    throw new CliError(`Update operation at index ${index} requires a non-empty 'id' string.`, {
+      code: "api_error",
+    });
+  }
+  return { op: "update", id, document };
+}
+
+function capitalize(input: string): string {
+  if (input.length === 0) return input;
+  return input[0].toUpperCase() + input.slice(1);
+}

@@ -11,6 +11,7 @@ import { loadProjectToken } from "../lib/config.js";
 import { CliError } from "../lib/error.js";
 import { formatWarning } from "../lib/output.js";
 import { getFlagBoolean } from "../lib/args.js";
+import { validateDiffOperations } from "../lib/memory.js";
 import type { Command, CommandContext } from "./index.js";
 import type { DiffOperation } from "../types.js";
 
@@ -28,47 +29,61 @@ export const pushCommand: Command = {
       );
     }
 
-    const raw = await readStdin();
+    const raw = await readStdin(ctx.stdin ?? stdin);
     let operations: DiffOperation[];
     try {
       const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed.operations)) {
-        throw new Error("Missing 'operations' array");
-      }
-      operations = parsed.operations;
+      operations = validateDiffOperations(parsed);
     } catch (err) {
-      throw new CliError(
-        "Push payload must be valid JSON with an 'operations' array. Pipe from the skill or agent.",
-        { code: "api_error", cause: err },
-      );
+      const message = err instanceof CliError ? err.message : "Push payload must be valid JSON.";
+      throw new CliError(message, {
+        code: "api_error",
+        cause: err instanceof CliError ? undefined : err,
+      });
     }
 
-    const result = await ctx.api.pushMemory(identity.projectId, projectToken, operations);
+    try {
+      const result = await ctx.api.pushMemory(identity.projectId, projectToken, operations);
 
-    if (getFlagBoolean(ctx.flags, "json")) {
-      ctx.out.writeLine(JSON.stringify(result, null, 2));
-      return 0;
-    }
+      if (getFlagBoolean(ctx.flags, "json")) {
+        ctx.out.writeLine(JSON.stringify(result, null, 2));
+        return 0;
+      }
 
-    ctx.out.writeLine(
-      `Pushed ${operations.length} operation(s). Total size: ${result.total_size_bytes} bytes.`,
-    );
-    if (result.read_only) {
       ctx.out.writeLine(
-        formatWarning(
-          "This push exceeded the quota. The project is now read-only until usage drops or the subscription is upgraded.",
-        ),
+        `Pushed ${operations.length} operation(s). Total size: ${result.total_size_bytes} bytes.`,
       );
+
+      if (result.read_only) {
+        ctx.out.writeLine(
+          formatWarning(
+            "This push exceeded the quota. The project is now read-only until usage drops or the subscription is upgraded.",
+          ),
+        );
+      }
+
+      return 0;
+    } catch (err) {
+      // 423 Locked means the project is already read-only; surface a clear
+      // warning to the agent/user without failing the session.
+      if (err instanceof CliError && err.code === "project_locked") {
+        ctx.out.writeLine(
+          formatWarning(
+            "Project memory is read-only (storage quota exceeded). Pulls continue to work; reduce usage or upgrade to push again.",
+          ),
+        );
+        return 0;
+      }
+      throw err;
     }
-    return 0;
   },
 };
 
-function readStdin(): Promise<string> {
+function readStdin(stream: NodeJS.ReadStream): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    stdin.on("data", (chunk: Buffer) => chunks.push(chunk));
-    stdin.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    stdin.on("error", (err) => reject(err));
+    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on("error", (err) => reject(err));
   });
 }

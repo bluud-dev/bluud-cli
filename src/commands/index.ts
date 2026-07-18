@@ -16,6 +16,8 @@ export interface CommandContext {
   flags: Record<string, string | boolean | string[]>;
   /** When true, the CLI is running non-interactively (e.g. inside an agent). */
   nonInteractive: boolean;
+  /** Optional stdin override for tests. Defaults to `process.stdin`. */
+  stdin?: NodeJS.ReadStream;
 }
 
 export interface Command {

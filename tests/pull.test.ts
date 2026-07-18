@@ -13,7 +13,10 @@ let originalConfigDir: string | undefined;
 
 function makeContext(overrides: Partial<CommandContext> = {}): CommandContext {
   return {
-    api: new ApiClient({ baseUrl: "http://localhost:1", fetchImpl: vi.fn() as unknown as typeof fetch }),
+    api: new ApiClient({
+      baseUrl: "http://localhost:1",
+      fetchImpl: vi.fn() as unknown as typeof fetch,
+    }),
     out: {
       write: vi.fn(),
       writeLine: vi.fn(),
@@ -117,7 +120,9 @@ describe("pullCommand", () => {
 
     expect(code).toBe(0);
     expect(pullMemory).toHaveBeenCalledWith(projectId, "bluud_pt_test_token");
-    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
     expect(written).toContain("# Bluud project memory");
     expect(written).toContain("## Architecture");
     expect(written).toContain("Core architecture decisions");
@@ -139,7 +144,9 @@ describe("pullCommand", () => {
     const code = await pullCommand.run(ctx);
 
     expect(code).toBe(0);
-    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).join("\n");
+    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
     expect(written).toContain("No memory has been recorded for this project yet");
   });
 
@@ -203,5 +210,90 @@ describe("pullCommand", () => {
   it("throws auth_required when no project token exists", async () => {
     const ctx = makeContext({ cwd: tempProject });
     await expect(pullCommand.run(ctx)).rejects.toMatchObject({ code: "auth_required" });
+  });
+
+  it("emits the Gemini CLI hook JSON envelope with --inject --format=gemini", async () => {
+    await setupProjectToken(tempProject);
+    const tree = makeTree({
+      nodes: [
+        {
+          id: "node-1",
+          project_id: "project-id",
+          parent_id: null,
+          title: "Rule",
+          description: "A rule",
+          body: "Body text.",
+          size_bytes: 10,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          depth: 0,
+        },
+      ],
+      total_size_bytes: 10,
+      quota_usage_ratio: 0.1,
+    });
+    const pullMemory = vi.fn().mockResolvedValue(tree);
+    const ctx = makeContext({
+      cwd: tempProject,
+      flags: { inject: true, format: "gemini" },
+      api: { pullMemory } as unknown as ApiClient,
+    });
+
+    const code = await pullCommand.run(ctx);
+
+    expect(code).toBe(0);
+    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    // Gemini CLI requires stdout to contain *only* the JSON object.
+    const parsed = JSON.parse(written);
+    expect(parsed.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("## Rule");
+  });
+
+  it("emits the Cline hook JSON envelope with --inject --format=cline", async () => {
+    await setupProjectToken(tempProject);
+    const tree = makeTree({
+      nodes: [
+        {
+          id: "node-1",
+          project_id: "project-id",
+          parent_id: null,
+          title: "Decision",
+          description: "A decision",
+          body: "Body text.",
+          size_bytes: 10,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          depth: 0,
+        },
+      ],
+      total_size_bytes: 10,
+      quota_usage_ratio: 0.1,
+    });
+    const pullMemory = vi.fn().mockResolvedValue(tree);
+    const ctx = makeContext({
+      cwd: tempProject,
+      flags: { inject: true, format: "cline" },
+      api: { pullMemory } as unknown as ApiClient,
+    });
+
+    const code = await pullCommand.run(ctx);
+
+    expect(code).toBe(0);
+    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = JSON.parse(written);
+    expect(Object.keys(parsed)).toEqual(["contextModification"]);
+    expect(parsed.contextModification).toContain("## Decision");
+  });
+
+  it("rejects an unknown --format value", async () => {
+    await setupProjectToken(tempProject);
+    const pullMemory = vi.fn().mockResolvedValue(makeTree());
+    const ctx = makeContext({
+      cwd: tempProject,
+      flags: { inject: true, format: "not-a-real-format" },
+      api: { pullMemory } as unknown as ApiClient,
+    });
+
+    await expect(pullCommand.run(ctx)).rejects.toMatchObject({ code: "config_error" });
   });
 });

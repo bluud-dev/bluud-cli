@@ -3,6 +3,8 @@ import { CliError } from "../src/lib/error.js";
 import {
   formatQuotaWarning,
   isQuotaWarning,
+  renderClineHookOutput,
+  renderGeminiHookOutput,
   renderMemoryTree,
   validateDiffOperations,
 } from "../src/lib/memory.js";
@@ -17,7 +19,9 @@ function makeTree(overrides: Partial<MemoryTree> = {}): MemoryTree {
   };
 }
 
-function makeNode(overrides: Partial<MemoryTree["nodes"][number]> = {}): MemoryTree["nodes"][number] {
+function makeNode(
+  overrides: Partial<MemoryTree["nodes"][number]> = {},
+): MemoryTree["nodes"][number] {
   return {
     id: "node-1",
     project_id: "project-id",
@@ -92,7 +96,9 @@ describe("isQuotaWarning", () => {
 
 describe("formatQuotaWarning", () => {
   it("includes the usage ratio and byte count", () => {
-    const message = formatQuotaWarning(makeTree({ total_size_bytes: 1000, quota_usage_ratio: 0.95 }));
+    const message = formatQuotaWarning(
+      makeTree({ total_size_bytes: 1000, quota_usage_ratio: 0.95 }),
+    );
     expect(message).toContain("95%");
     expect(message).toContain("1000 bytes");
   });
@@ -133,9 +139,9 @@ describe("validateDiffOperations", () => {
   });
 
   it("rejects an unknown op", () => {
-    expect(() =>
-      validateDiffOperations({ operations: [{ op: "merge", id: "uuid" }] }),
-    ).toThrow('expected "create", "update", or "delete"');
+    expect(() => validateDiffOperations({ operations: [{ op: "merge", id: "uuid" }] })).toThrow(
+      'expected "create", "update", or "delete"',
+    );
   });
 
   it("rejects create without document", () => {
@@ -160,5 +166,37 @@ describe("validateDiffOperations", () => {
     expect(() =>
       validateDiffOperations({ operations: [{ op: "create", id: "", document: "doc" }] }),
     ).toThrow("invalid 'id'");
+  });
+});
+
+describe("renderGeminiHookOutput", () => {
+  it("emits only a single JSON object with hookSpecificOutput.additionalContext", () => {
+    const tree = makeTree({
+      nodes: [makeNode({ title: "Rule", description: "A rule", body: "Details." })],
+    });
+
+    const output = renderGeminiHookOutput(tree);
+
+    // Gemini CLI requires stdout to be *only* JSON — no trailing newline noise
+    // or stray text is embedded.
+    const parsed = JSON.parse(output);
+    expect(parsed.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("## Rule");
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("Details.");
+  });
+});
+
+describe("renderClineHookOutput", () => {
+  it("emits only a single JSON object with contextModification", () => {
+    const tree = makeTree({
+      nodes: [makeNode({ title: "Decision", description: "A decision", body: "Because X." })],
+    });
+
+    const output = renderClineHookOutput(tree);
+
+    const parsed = JSON.parse(output);
+    expect(Object.keys(parsed)).toEqual(["contextModification"]);
+    expect(parsed.contextModification).toContain("## Decision");
+    expect(parsed.contextModification).toContain("Because X.");
   });
 });

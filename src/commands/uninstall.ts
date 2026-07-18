@@ -6,10 +6,33 @@ import * as p from "@clack/prompts";
 import os from "node:os";
 import { CliError } from "../lib/error.js";
 import { uninstallClaudeCode } from "../lib/adapters/claudecode.js";
-import { getFlagArray } from "../lib/args.js";
+import { uninstallCodex } from "../lib/adapters/codex.js";
+import { uninstallGeminiCli } from "../lib/adapters/geminicli.js";
+import { uninstallKimi } from "../lib/adapters/kimi.js";
+import { uninstallCline } from "../lib/adapters/cline.js";
+import type { AdapterEnv } from "../lib/adapters/types.js";
+import { getFlagArray, getFlagBoolean } from "../lib/args.js";
 import type { Command, CommandContext } from "./index.js";
 
-const SUPPORTED_AGENTS = ["claude-code", "codex", "cursor", "windsurf", "aider", "github-copilot"];
+const SUPPORTED_AGENTS = [
+  "claude-code",
+  "codex",
+  "gemini-cli",
+  "kimi-code-cli",
+  "cline",
+  "cursor",
+  "windsurf",
+  "aider",
+  "github-copilot",
+];
+
+const ADAPTER_UNINSTALLERS: Record<string, (env: AdapterEnv) => Promise<boolean>> = {
+  "claude-code": uninstallClaudeCode,
+  codex: uninstallCodex,
+  "gemini-cli": uninstallGeminiCli,
+  "kimi-code-cli": uninstallKimi,
+  cline: uninstallCline,
+};
 
 export const uninstallCommand: Command = {
   name: "uninstall",
@@ -23,12 +46,14 @@ export const uninstallCommand: Command = {
     }
 
     const home = os.homedir();
-    const env = { cwd: ctx.cwd, home, global: false, bluudBinary: process.argv[1] ?? "bluud" };
+    const global = getFlagBoolean(ctx.flags, "global") || getFlagBoolean(ctx.flags, "g");
+    const env: AdapterEnv = { cwd: ctx.cwd, home, global, bluudBinary: process.argv[1] ?? "bluud" };
 
     for (const agent of agents) {
       await removeSkillFiles(agent, ctx.cwd, home);
-      if (agent === "claude-code") {
-        await uninstallClaudeCode(env);
+      const uninstallAdapter = ADAPTER_UNINSTALLERS[agent];
+      if (uninstallAdapter) {
+        await uninstallAdapter(env);
       }
     }
 
@@ -72,6 +97,18 @@ async function removeSkillFiles(agent: string, cwd: string, home: string): Promi
     codex: {
       project: `${cwd}/.codex/skills/bluud-memory`,
       global: `${home}/.codex/skills/bluud-memory`,
+    },
+    "gemini-cli": {
+      project: `${cwd}/.agents/skills/bluud-memory`,
+      global: `${home}/.gemini/skills/bluud-memory`,
+    },
+    "kimi-code-cli": {
+      project: `${cwd}/.agents/skills/bluud-memory`,
+      global: `${home}/.agents/skills/bluud-memory`,
+    },
+    cline: {
+      project: `${cwd}/.agents/skills/bluud-memory`,
+      global: `${home}/.agents/skills/bluud-memory`,
     },
     cursor: { project: `${cwd}/.cursor/rules/bluud-memory.mdc`, global: null },
     windsurf: { project: `${cwd}/.windsurfrules`, global: null },

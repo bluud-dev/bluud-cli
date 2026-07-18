@@ -31,7 +31,17 @@ import { CliError } from "../lib/error.js";
 import { getFlagBoolean, getFlagArray, getFlagString } from "../lib/args.js";
 import type { Command, CommandContext } from "./index.js";
 
-const SUPPORTED_AGENTS = ["claude-code", "codex", "cursor", "windsurf", "aider", "github-copilot"];
+const SUPPORTED_AGENTS = [
+  "claude-code",
+  "codex",
+  "gemini-cli",
+  "kimi-code-cli",
+  "cline",
+  "cursor",
+  "windsurf",
+  "aider",
+  "github-copilot",
+];
 
 export const installCommand: Command = {
   name: "install",

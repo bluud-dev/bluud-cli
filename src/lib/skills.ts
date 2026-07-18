@@ -135,6 +135,9 @@ function resolveSkillTargetDir(agent: string, global: boolean, cwd: string): str
   const registry: Record<string, { project: string; global: string | null }> = {
     "claude-code": { project: ".claude/skills", global: join(home, ".claude", "skills") },
     codex: { project: ".codex/skills", global: join(home, ".codex", "skills") },
+    "gemini-cli": { project: ".agents/skills", global: join(home, ".gemini", "skills") },
+    "kimi-code-cli": { project: ".agents/skills", global: join(home, ".agents", "skills") },
+    cline: { project: ".agents/skills", global: join(home, ".agents", "skills") },
     cursor: { project: ".cursor/rules", global: null },
     windsurf: { project: ".windsurfrules", global: null },
     aider: { project: "AIDER.md", global: null },

@@ -52,6 +52,34 @@ function renderNode(node: MemoryNode): string[] {
 }
 
 /**
+ * Render a memory tree as the JSON envelope Gemini CLI's `SessionStart` hook
+ * contract requires: hooks must print *only* a single JSON object to stdout
+ * (any stray plain text breaks its parser), with the injected text carried in
+ * `hookSpecificOutput.additionalContext`.
+ *
+ * https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md
+ */
+export function renderGeminiHookOutput(tree: MemoryTree): string {
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "SessionStart",
+      additionalContext: renderMemoryTree(tree),
+    },
+  });
+}
+
+/**
+ * Render a memory tree as the JSON envelope Cline's `TaskStart` hook contract
+ * requires: `contextModification` is folded into the *next* API request (not
+ * the current turn) per Cline's hooks documentation.
+ *
+ * https://docs.cline.bot/features/hooks
+ */
+export function renderClineHookOutput(tree: MemoryTree): string {
+  return JSON.stringify({ contextModification: renderMemoryTree(tree) });
+}
+
+/**
  * Return true when the project is near or over its quota. Pull continues to
  * work in this state, but the user (or agent) should be warned.
  */
@@ -74,7 +102,11 @@ export function formatQuotaWarning(tree: MemoryTree): string {
  * agent gets a clear, actionable message instead of a raw 422 from the server.
  */
 export function validateDiffOperations(raw: unknown): DiffOperation[] {
-  if (raw === null || typeof raw !== "object" || !Array.isArray((raw as { operations?: unknown }).operations)) {
+  if (
+    raw === null ||
+    typeof raw !== "object" ||
+    !Array.isArray((raw as { operations?: unknown }).operations)
+  ) {
     throw new CliError("Push payload must be an object with an 'operations' array.", {
       code: "api_error",
     });

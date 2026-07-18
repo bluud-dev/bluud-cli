@@ -2,8 +2,15 @@
  * Claude Code hook adapter.
  *
  * Writes a `SessionStart` hook into Claude Code's settings file so that every
- * new conversation runs `bluud pull --inject` and loads project memory into the
- * context.
+ * new conversation runs `bluud pull --inject` and loads project memory into
+ * the context.
+ *
+ * Schema (verified against https://code.claude.com/docs/en/hooks):
+ *   hooks.SessionStart: Array<{ matcher?: string; hooks: Array<{ type: "command"; command: string }> }>
+ * `matcher` is one of "startup" | "resume" | "clear" | "compact"; omitting it
+ * (or using "*") matches every SessionStart source. Bluud omits it so memory
+ * is refreshed on every source, not just a fresh `claude` launch. Plain stdout
+ * text from the command is automatically added as context for this event.
  */
 
 import { join } from "node:path";
@@ -18,6 +25,22 @@ import {
 
 const ADAPTER_NAME = "claude-code";
 const MARKER_SCOPE = "session-start";
+
+interface ClaudeHookEntry {
+  type: "command";
+  command: string;
+}
+
+interface ClaudeHookMatcher {
+  matcher?: string;
+  hooks: ClaudeHookEntry[];
+}
+
+interface ClaudeSettings extends Record<string, unknown> {
+  hooks?: {
+    SessionStart?: ClaudeHookMatcher[];
+  };
+}
 
 export const claudeCodeAdapter: Adapter = {
   name: ADAPTER_NAME,
@@ -61,11 +84,16 @@ export const claudeCodeAdapter: Adapter = {
     // Write the SessionStart hook via JSON merge so unrelated settings are preserved.
     await mergeJsonFile<ClaudeSettings>(settingsPath, (current) => {
       const next = { ...current };
-      if (!next.hooks) next.hooks = {};
-      if (!next.hooks.SessionStart) next.hooks.SessionStart = [];
-      const hook = buildHookCommand(env.bluudBinary);
-      if (!next.hooks.SessionStart.includes(hook)) {
-        next.hooks.SessionStart = [...next.hooks.SessionStart, hook];
+      next.hooks = { ...next.hooks };
+      const existingEntries = next.hooks.SessionStart ?? [];
+      const command = buildHookCommand(env.bluudBinary);
+      const alreadyPresent = existingEntries.some((entry) =>
+        entry.hooks.some((h) => h.type === "command" && h.command === command),
+      );
+      if (!alreadyPresent) {
+        next.hooks.SessionStart = [...existingEntries, { hooks: [{ type: "command", command }] }];
+      } else {
+        next.hooks.SessionStart = existingEntries;
       }
       return next;
     });
@@ -100,12 +128,6 @@ function hasHook(text: string | null, bluudBinary: string): boolean {
   return text.includes(buildHookCommand(bluudBinary));
 }
 
-interface ClaudeSettings extends Record<string, unknown> {
-  hooks?: {
-    SessionStart?: string[];
-  };
-}
-
 export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
   const settingsPath = getSettingsPath(env);
   const removedMarker = await removeMarkerBlockFile(
@@ -119,12 +141,20 @@ export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
   let changed = false;
   await mergeJsonFile<ClaudeSettings>(settingsPath, (current) => {
     if (!current.hooks?.SessionStart) return current;
-    const hook = buildHookCommand(env.bluudBinary);
+    const command = buildHookCommand(env.bluudBinary);
     const next = { ...current };
     next.hooks = { ...next.hooks };
-    const currentHooks = next.hooks.SessionStart ?? [];
-    next.hooks.SessionStart = currentHooks.filter((h) => h !== hook);
-    changed = next.hooks.SessionStart.length !== (current.hooks.SessionStart?.length ?? 0);
+    const before = next.hooks.SessionStart ?? [];
+    const after = before
+      .map((entry) => ({
+        ...entry,
+        hooks: entry.hooks.filter((h) => !(h.type === "command" && h.command === command)),
+      }))
+      .filter((entry) => entry.hooks.length > 0);
+    next.hooks.SessionStart = after;
+    const beforeCount = before.reduce((n, e) => n + e.hooks.length, 0);
+    const afterCount = after.reduce((n, e) => n + e.hooks.length, 0);
+    changed = afterCount !== beforeCount;
     return next;
   });
 

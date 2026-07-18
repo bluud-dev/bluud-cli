@@ -67,7 +67,7 @@ function buildEnv(ctx: CommandContext): AdapterEnv {
   return {
     cwd: ctx.cwd,
     home: os.homedir(),
-    global: false,
+    global: getFlagBoolean(ctx.flags, "global") || getFlagBoolean(ctx.flags, "g"),
     bluudBinary: process.argv[1] ?? "bluud",
   };
 }

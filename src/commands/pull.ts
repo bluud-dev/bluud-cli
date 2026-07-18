@@ -8,9 +8,17 @@
 import { requireIdentity } from "../lib/identity.js";
 import { loadProjectToken } from "../lib/config.js";
 import { CliError } from "../lib/error.js";
-import { getFlagBoolean } from "../lib/args.js";
-import { formatQuotaWarning, isQuotaWarning, renderMemoryTree } from "../lib/memory.js";
+import { getFlagBoolean, getFlagString } from "../lib/args.js";
+import {
+  formatQuotaWarning,
+  isQuotaWarning,
+  renderClineHookOutput,
+  renderGeminiHookOutput,
+  renderMemoryTree,
+} from "../lib/memory.js";
 import type { Command, CommandContext } from "./index.js";
+
+const HOOK_FORMATS = new Set(["gemini", "cline"]);
 
 export const pullCommand: Command = {
   name: "pull",
@@ -38,7 +46,20 @@ export const pullCommand: Command = {
     }
 
     if (getFlagBoolean(ctx.flags, "inject")) {
-      ctx.out.writeLine(renderMemoryTree(tree));
+      const format = getFlagString(ctx.flags, "format");
+      if (format !== undefined && !HOOK_FORMATS.has(format)) {
+        throw new CliError(
+          `Unknown --format '${format}'. Expected one of: ${Array.from(HOOK_FORMATS).join(", ")}.`,
+          { code: "config_error" },
+        );
+      }
+      if (format === "gemini") {
+        ctx.out.writeLine(renderGeminiHookOutput(tree));
+      } else if (format === "cline") {
+        ctx.out.writeLine(renderClineHookOutput(tree));
+      } else {
+        ctx.out.writeLine(renderMemoryTree(tree));
+      }
       return 0;
     }
 

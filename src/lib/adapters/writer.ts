@@ -38,14 +38,70 @@ export async function readTextFile(filePath: string): Promise<string | null> {
   }
 }
 
+/**
+ * String-aware JSONC comment stripper.
+ *
+ * A naive regex-based stripper corrupts any JSON string value that itself
+ * contains `//` or `/*` (e.g. a URL in a hook command or a Windows path).
+ * This walks the source character-by-character, tracking whether the cursor
+ * is inside a string literal (respecting backslash escapes) and only treats
+ * `//` / `/* ... *\/` as comments outside of strings. Trailing commas before
+ * `}` or `]` are also tolerated, matching common JSONC dialects (including
+ * Claude Code's settings files).
+ */
 export function stripJsonComments(json: string): string {
-  // Minimal JSONC stripper sufficient for Claude Code settings files:
-  // handles // line comments and /* */ block comments.
-  return json
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((line) => line.replace(/\/\/.*$/, ""))
-    .join("\n");
+  let out = "";
+  let i = 0;
+  const len = json.length;
+  let inString = false;
+  let stringQuote = "";
+
+  while (i < len) {
+    const ch = json[i] as string;
+    const next = json[i + 1];
+
+    if (inString) {
+      out += ch;
+      if (ch === "\\" && i + 1 < len) {
+        out += next;
+        i += 2;
+        continue;
+      }
+      if (ch === stringQuote) {
+        inString = false;
+        stringQuote = "";
+      }
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      stringQuote = ch;
+      out += ch;
+      i += 1;
+      continue;
+    }
+
+    if (ch === "/" && next === "/") {
+      i += 2;
+      while (i < len && json[i] !== "\n") i += 1;
+      continue;
+    }
+
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < len && !(json[i] === "*" && json[i + 1] === "/")) i += 1;
+      i += 2;
+      continue;
+    }
+
+    out += ch;
+    i += 1;
+  }
+
+  // Tolerate trailing commas: ",\s*}" -> "}", ",\s*]" -> "]".
+  return out.replace(/,(\s*[}\]])/g, "$1");
 }
 
 export async function mergeJsonFile<T extends Record<string, unknown>>(
@@ -92,13 +148,24 @@ export async function writeMarkerBlockFile(filePath: string, block: MarkerBlock)
   await atomicWriteFile(filePath, next);
 }
 
+function buildMarkers(
+  scope: string,
+  commentPrefix: string,
+  commentSuffix: string,
+): { startMarker: string; endMarker: string } {
+  const suffix = commentSuffix ? ` ${commentSuffix}` : "";
+  return {
+    startMarker: `${commentPrefix} bluud:${scope}:start${suffix}`,
+    endMarker: `${commentPrefix} bluud:${scope}:end${suffix}`,
+  };
+}
+
 export function markerBlock(
   scope: string,
   content: string,
   { commentPrefix = "<!--" as string, commentSuffix = "-->" as string } = {},
 ): MarkerBlock {
-  const startMarker = `${commentPrefix} bluud:${scope}:start ${commentSuffix}`;
-  const endMarker = `${commentPrefix} bluud:${scope}:end ${commentSuffix}`;
+  const { startMarker, endMarker } = buildMarkers(scope, commentPrefix, commentSuffix);
   return { startMarker, endMarker, content };
 }
 
@@ -110,8 +177,7 @@ export async function removeMarkerBlockFile(
   const existing = await readTextFile(filePath);
   if (existing === null) return false;
 
-  const startMarker = `${commentPrefix} bluud:${scope}:start ${commentSuffix}`;
-  const endMarker = `${commentPrefix} bluud:${scope}:end ${commentSuffix}`;
+  const { startMarker, endMarker } = buildMarkers(scope, commentPrefix, commentSuffix);
   const startIdx = existing.indexOf(startMarker);
   const endIdx = existing.indexOf(endMarker);
   if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return false;

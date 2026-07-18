@@ -115,10 +115,7 @@ async function ensureAuth(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  assertInteractive(
-    ctx.nonInteractive,
-    "Not signed in. Run `bluud login` or pass --token <PAT>.",
-  );
+  assertInteractive(ctx.nonInteractive, "Not signed in. Run `bluud login` or pass --token <PAT>.");
 
   const method = await promptSelect<"browser" | "token">("Sign in to Bluud", [
     { value: "browser", label: "Open browser" },

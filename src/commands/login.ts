@@ -22,7 +22,8 @@ export const loginCommand: Command = {
     if (tokenFlag) {
       const session = await loginWithToken(ctx.api, tokenFlag);
       await saveAuth(session, true);
-      ctx.out.writeLine("Authenticated with personal access token.");
+      const account = await ctx.api.getAccount();
+      ctx.out.writeLine(`Authenticated as ${account.email} with personal access token.`);
       return 0;
     }
 
@@ -54,17 +55,26 @@ export const loginCommand: Command = {
       }
       const session = await loginWithToken(ctx.api, pat);
       await saveAuth(session, true);
-      ctx.out.writeLine("Authenticated with personal access token.");
+      const account = await ctx.api.getAccount();
+      ctx.out.writeLine(`Authenticated as ${account.email} with personal access token.`);
       return 0;
     }
 
     const spinner = p.spinner();
     spinner.start("Waiting for browser authorization…");
     try {
-      const session = await loginWithBrowser(ctx.api);
+      const session = await loginWithBrowser(ctx.api, {
+        onBrowserUnavailable: (url) => {
+          spinner.stop("Could not open a browser.");
+          ctx.out.writeLine(`Please open this URL to authorize the Bluud CLI:\n  ${url}`);
+          spinner.start("Waiting for authorization…");
+        },
+      });
+      ctx.api.setSession(session);
       await saveAuth(session, false);
       spinner.stop("Signed in.");
-      ctx.out.writeLine("Authenticated successfully.");
+      const account = await ctx.api.getAccount();
+      ctx.out.writeLine(`Authenticated as ${account.email}.`);
       return 0;
     } catch (err) {
       spinner.stop("Authorization failed.");

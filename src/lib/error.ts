@@ -81,7 +81,8 @@ const ERROR_GUIDANCE: Record<ErrorCode, string | null> = {
   identity_error: "Run this inside your project directory (a git repo or any folder).",
   project_not_found: "Run `bluud` in this directory to register the project first.",
   subscription_required: "This needs a paid plan. Manage it at https://bluud.dev/settings/billing.",
-  project_locked: "This project is read-only (storage full). Free up space or upgrade to write again.",
+  project_locked:
+    "This project is read-only (storage full). Free up space or upgrade to write again.",
   cancelled: null,
   unknown: null,
 };

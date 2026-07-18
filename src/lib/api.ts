@@ -75,6 +75,12 @@ export class ApiClient {
     return this.request<{ id: string; email: string }>("GET", "/account/me");
   }
 
+  async logout(refreshToken: string): Promise<void> {
+    await this.request("POST", "/auth/logout", {
+      body: { refresh_token: refreshToken },
+    });
+  }
+
   // -------------------------------------------------------------------------
   // Projects
   // -------------------------------------------------------------------------

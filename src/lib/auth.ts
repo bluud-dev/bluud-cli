@@ -17,9 +17,13 @@ import type { AuthSession } from "../types.js";
 const PKCE_VERIFIER_BYTES = 48;
 const CLI_AUTHORIZE_URL = "https://bluud.dev/cli/authorize";
 
-export interface LoopbackResult {
-  success: boolean;
-  manualUrl?: string;
+export interface LoginWithBrowserOptions {
+  /**
+   * Invoked when the OS cannot open a browser. The caller can print the
+   * authorize URL and instructions; the loopback listener keeps waiting for the
+   * callback. If omitted, a browser-open failure throws immediately.
+   */
+  onBrowserUnavailable?: (url: string) => void;
 }
 
 export function generatePkcePair(): { verifier: string; challenge: string } {
@@ -31,7 +35,10 @@ export function generatePkcePair(): { verifier: string; challenge: string } {
   return { verifier, challenge };
 }
 
-export async function loginWithBrowser(api: ApiClient): Promise<AuthSession> {
+export async function loginWithBrowser(
+  api: ApiClient,
+  options: LoginWithBrowserOptions = {},
+): Promise<AuthSession> {
   const { verifier, challenge } = generatePkcePair();
   const state = randomBytes(16).toString("hex");
 
@@ -40,18 +47,18 @@ export async function loginWithBrowser(api: ApiClient): Promise<AuthSession> {
   // browser's callback — binding twice on the same port would EADDRINUSE.
   const loopback = await startLoopback(state);
   try {
-    const authorizeUrl = new URL(CLI_AUTHORIZE_URL);
-    authorizeUrl.searchParams.set("code_challenge", challenge);
-    authorizeUrl.searchParams.set("redirect_uri", loopback.redirectUri);
-    authorizeUrl.searchParams.set("code_challenge_method", "S256");
-    authorizeUrl.searchParams.set("state", state);
+    const authorizeUrl = buildAuthorizeUrl({ challenge, redirectUri: loopback.redirectUri, state });
 
-    const opened = await openBrowser(authorizeUrl.toString());
+    const opened = await openBrowser(authorizeUrl);
     if (!opened) {
-      throw new CliError(
-        `Could not open a browser. Please authenticate manually at:\n  ${authorizeUrl.toString()}`,
-        { code: "auth_failed" },
-      );
+      if (options.onBrowserUnavailable) {
+        options.onBrowserUnavailable(authorizeUrl);
+      } else {
+        throw new CliError(
+          `Could not open a browser. Please authenticate manually at:\n  ${authorizeUrl}`,
+          { code: "auth_failed" },
+        );
+      }
     }
 
     const code = await loopback.waitForCode();
@@ -64,11 +71,33 @@ export async function loginWithBrowser(api: ApiClient): Promise<AuthSession> {
 export async function loginWithToken(api: ApiClient, pat: string): Promise<AuthSession> {
   api.setSession({ access_token: pat, refresh_token: "", token_type: "bearer" });
   // Verify the PAT works by fetching the current account.
-  const account = await api.getAccount();
-  if (!account || !account.email) {
-    throw new CliError("The provided token is invalid.", { code: "auth_failed" });
+  try {
+    const account = await api.getAccount();
+    if (!account || !account.email) {
+      throw new CliError("The provided token is invalid.", { code: "auth_failed" });
+    }
+  } catch (err) {
+    if (err instanceof CliError) {
+      // Surface a PAT-specific message instead of the generic API/auth_required
+      // wording that the account endpoint would return on a bad bearer.
+      throw new CliError("The provided token is invalid.", { code: "auth_failed" });
+    }
+    throw err;
   }
   return { access_token: pat, refresh_token: "", token_type: "bearer" };
+}
+
+function buildAuthorizeUrl(options: {
+  challenge: string;
+  redirectUri: string;
+  state: string;
+}): string {
+  const authorizeUrl = new URL(CLI_AUTHORIZE_URL);
+  authorizeUrl.searchParams.set("code_challenge", options.challenge);
+  authorizeUrl.searchParams.set("redirect_uri", options.redirectUri);
+  authorizeUrl.searchParams.set("code_challenge_method", "S256");
+  authorizeUrl.searchParams.set("state", options.state);
+  return authorizeUrl.toString();
 }
 
 interface Loopback {
@@ -101,7 +130,9 @@ async function startLoopback(expectedState: string): Promise<Loopback> {
       const state = url.searchParams.get("state");
 
       if (error) {
-        outcome = { error: new CliError(`Authorization failed: ${error}`, { code: "auth_failed" }) };
+        outcome = {
+          error: new CliError(`Authorization failed: ${error}`, { code: "auth_failed" }),
+        };
       } else if (state !== expectedState) {
         // Reject on state mismatch (CSRF guard) — but only for a request that
         // is actually a callback attempt, so stray probes don't kill the flow.

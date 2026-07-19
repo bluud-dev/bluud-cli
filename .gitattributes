@@ -1,0 +1,11 @@
+# The hook-script templates are executed by an interpreter that does not
+# tolerate the wrong line endings: cmd.exe parses a `.cmd` up to each CR (an
+# LF-only file makes it run fragments of the comment block as commands), and a
+# CRLF `.sh` makes the kernel look for an interpreter named `sh\r`. Pin both so
+# a checkout under any `core.autocrlf` setting stores the right bytes.
+#
+# `renderHookScript` normalizes line endings again when it materializes a
+# script, so a mangled checkout still produces a working hook — this file keeps
+# the source of truth honest rather than being the only line of defense.
+*.cmd text eol=crlf
+*.sh  text eol=lf

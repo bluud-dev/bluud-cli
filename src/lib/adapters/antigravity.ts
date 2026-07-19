@@ -21,9 +21,12 @@ import type { Adapter, AdapterEnv, AdapterPlan, AdapterResult, ApplyOptions } fr
 import { readTextFile } from "./writer.js";
 import {
   applyGeminiSessionStartHook,
+  geminiHookScriptPath,
+  geminiHookScriptSpec,
   hasGeminiHook,
   removeGeminiSessionStartHook,
 } from "./geminiHooks.js";
+import { applyHookScript, planHookScript, removeHookScript } from "./hookScript.js";
 
 const ADAPTER_NAME = "antigravity";
 
@@ -39,12 +42,21 @@ export const antigravityAdapter: Adapter = {
     const detected = await this.detect(env);
     const settingsPath = getSettingsPath(env);
     const existing = await readTextFile(settingsPath);
-    const wouldChange = detected && !(await hasGeminiHook(settingsPath, env.bluudBinary));
+    const script = await planHookScript(env, geminiHookScriptSpec(env));
+    const wouldChange = detected && !(await hasGeminiHook(settingsPath, script.path));
 
     return {
       name: ADAPTER_NAME,
       detected,
       actions: [
+        {
+          path: script.path,
+          description: script.foreign
+            ? "Bluud pull hook script (skipped — an existing user-authored script is present)"
+            : "Bluud pull hook script (shared with Gemini CLI)",
+          present: script.present,
+          wouldChange: detected && script.wouldChange,
+        },
         {
           path: settingsPath,
           description:
@@ -65,7 +77,12 @@ export const antigravityAdapter: Adapter = {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
     }
 
-    await applyGeminiSessionStartHook(getSettingsPath(env), env.bluudBinary, "bluud-memory-pull");
+    const scriptPath = await applyHookScript(env, geminiHookScriptSpec(env));
+    if (scriptPath === null) {
+      return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
+    }
+
+    await applyGeminiSessionStartHook(getSettingsPath(env), scriptPath, "bluud-memory-pull");
 
     return { name: ADAPTER_NAME, applied: true, actions: plan.actions };
   },
@@ -75,6 +92,10 @@ function getSettingsPath(env: AdapterEnv): string {
   return join(env.home, ".gemini", "settings.json");
 }
 
+/** Shared with Gemini CLI — see `uninstallGeminiCli` for the coupling note. */
 export async function uninstallAntigravity(env: AdapterEnv): Promise<boolean> {
-  return removeGeminiSessionStartHook(getSettingsPath(env), env.bluudBinary);
+  const scriptPath = geminiHookScriptPath(env);
+  const removedHook = await removeGeminiSessionStartHook(getSettingsPath(env), scriptPath);
+  const removedScript = await removeHookScript(scriptPath);
+  return removedHook || removedScript;
 }

@@ -20,6 +20,7 @@
     "bin",
     "dist",
     "src/skill",
+    "src/hooks",
     "README.md",
     "LICENSE"
   ],

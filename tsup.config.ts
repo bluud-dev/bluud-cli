@@ -18,13 +18,17 @@ export default defineConfig({
       js: "#!/usr/bin/env node",
     };
   },
-  // Copy the bundled skill files into dist so the shim can locate them next to the bundle.
+  // Copy the bundled package assets into dist so the shim can locate them next
+  // to the bundle: the skill payload delivered by `skills`, and the hook-script
+  // templates the adapters materialize into each tool's config directory.
   onSuccess: async () => {
     const { cp } = await import("node:fs/promises");
     const { join } = await import("node:path");
-    await cp(join("src", "skill"), join("dist", "skill"), {
-      recursive: true,
-      force: true,
-    });
+    for (const asset of ["skill", "hooks"]) {
+      await cp(join("src", asset), join("dist", asset), {
+        recursive: true,
+        force: true,
+      });
+    }
   },
 });

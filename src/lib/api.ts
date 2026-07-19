@@ -358,6 +358,8 @@ const KNOWN_ERROR_CODES = new Set<ErrorCode>([
   "project_limit_exceeded",
   "subscription_required",
   "project_locked",
+  "not_owner",
+  "not_member",
   "cancelled",
   "unknown",
 ]);

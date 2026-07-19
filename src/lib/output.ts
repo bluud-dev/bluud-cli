@@ -40,3 +40,11 @@ export function formatWarning(message: string): string {
 export function formatSuccess(message: string): string {
   return `${pc.green("✓")} ${message}`;
 }
+
+export function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(units.length - 1, Math.floor(Math.log10(bytes) / 3));
+  const value = bytes / Math.pow(1000, i);
+  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}

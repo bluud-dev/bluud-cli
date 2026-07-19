@@ -32,10 +32,15 @@ vi.mock("../src/lib/identity.js", () => ({
 vi.mock("../src/lib/skills.js", () => ({
   installSkill: vi.fn(),
   bundledSkillPath: vi.fn(() => "/mock/skill"),
+  BLUUD_SKILL_NAME: "bluud-memory",
 }));
 
 vi.mock("../src/lib/adapters/index.js", () => ({
   applyAll: vi.fn(),
+}));
+
+vi.mock("../src/lib/detect.js", () => ({
+  detectAgents: vi.fn(),
 }));
 
 import * as p from "@clack/prompts";
@@ -44,6 +49,7 @@ import { saveAuth, saveProjectToken } from "../src/lib/config.js";
 import { requireIdentity } from "../src/lib/identity.js";
 import { installSkill } from "../src/lib/skills.js";
 import { applyAll } from "../src/lib/adapters/index.js";
+import { detectAgents } from "../src/lib/detect.js";
 
 const mockedSelect = vi.mocked(p.select);
 const mockedMultiselect = vi.mocked(p.multiselect);
@@ -55,6 +61,7 @@ const mockedSaveProjectToken = vi.mocked(saveProjectToken);
 const mockedRequireIdentity = vi.mocked(requireIdentity);
 const mockedInstallSkill = vi.mocked(installSkill);
 const mockedApplyAll = vi.mocked(applyAll);
+const mockedDetectAgents = vi.mocked(detectAgents);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -129,7 +136,19 @@ describe("installCommand", () => {
     vi.clearAllMocks();
     mockedSpinner.mockReturnValue(makeSpinner());
     mockedRequireIdentity.mockResolvedValue(identity);
-    mockedInstallSkill.mockResolvedValue({ installed: true, mode: "skills" });
+    mockedInstallSkill.mockResolvedValue({ agent: "claude-code", installed: true, mode: "skills" });
+    mockedDetectAgents.mockResolvedValue({
+      "claude-code": true,
+      codex: false,
+      "gemini-cli": false,
+      antigravity: false,
+      "kimi-code-cli": false,
+      cline: false,
+      cursor: false,
+      windsurf: false,
+      aider: false,
+      "github-copilot": false,
+    });
     mockedApplyAll.mockResolvedValue([
       {
         name: "claude-code",
@@ -254,5 +273,124 @@ describe("installCommand", () => {
       expect.any(Object),
       expect.objectContaining({ dryRun: true, force: false }),
     );
+  });
+
+  it("honors --dry-run for skill installation (writes nothing)", async () => {
+    const session: AuthSession = {
+      access_token: "access",
+      refresh_token: "refresh",
+      token_type: "bearer",
+    };
+    mockedLoginWithToken.mockResolvedValue(session);
+    mockedInstallSkill.mockResolvedValue({
+      agent: "claude-code",
+      installed: false,
+      mode: "skills",
+      message: "dry run — no changes written",
+    });
+
+    const ctx = makeContext({
+      flags: { token: "bluud_pat_xxx", "dry-run": true },
+      nonInteractive: true,
+    });
+    await installCommand.run(ctx);
+
+    expect(mockedInstallSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "claude-code", dryRun: true }),
+    );
+  });
+
+  it("defaults agent selection to detected tools when no --agent is given", async () => {
+    const session: AuthSession = {
+      access_token: "access",
+      refresh_token: "refresh",
+      token_type: "bearer",
+    };
+    mockedLoginWithToken.mockResolvedValue(session);
+    mockedDetectAgents.mockResolvedValue({
+      "claude-code": true,
+      codex: true,
+      "gemini-cli": false,
+      antigravity: false,
+      "kimi-code-cli": false,
+      cline: false,
+      cursor: false,
+      windsurf: false,
+      aider: false,
+      "github-copilot": false,
+    });
+
+    const ctx = makeContext({
+      flags: { token: "bluud_pat_xxx" },
+      nonInteractive: true,
+    });
+    await installCommand.run(ctx);
+
+    expect(mockedInstallSkill).toHaveBeenCalledTimes(2);
+    expect(mockedInstallSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ agent: "claude-code" }),
+    );
+    expect(mockedInstallSkill).toHaveBeenCalledWith(expect.objectContaining({ agent: "codex" }));
+  });
+
+  it("pre-selects detected tools in the interactive multiselect", async () => {
+    const session: AuthSession = {
+      access_token: "access-xyz",
+      refresh_token: "refresh-xyz",
+      token_type: "bearer",
+    };
+    mockedLoginWithBrowser.mockResolvedValue(session);
+    mockedDetectAgents.mockResolvedValue({
+      "claude-code": true,
+      codex: true,
+      "gemini-cli": false,
+      antigravity: false,
+      "kimi-code-cli": false,
+      cline: false,
+      cursor: false,
+      windsurf: false,
+      aider: false,
+      "github-copilot": false,
+    });
+    mockedMultiselect.mockResolvedValue(["claude-code", "codex"]);
+
+    const ctx = makeContext();
+    await installCommand.run(ctx);
+
+    expect(mockedMultiselect).toHaveBeenCalledWith(
+      expect.objectContaining({ initialValues: ["claude-code", "codex"] }),
+    );
+  });
+
+  it("supports --json for machine-readable output and skips prompts", async () => {
+    const session: AuthSession = {
+      access_token: "access",
+      refresh_token: "refresh",
+      token_type: "bearer",
+    };
+    mockedLoginWithToken.mockResolvedValue(session);
+
+    const ctx = makeContext({
+      flags: { token: "bluud_pat_xxx", json: true },
+    });
+    const code = await installCommand.run(ctx);
+
+    expect(code).toBe(0);
+    expect(mockedSelect).not.toHaveBeenCalled();
+    expect(mockedMultiselect).not.toHaveBeenCalled();
+    expect(ctx.out.writeLine).toHaveBeenCalled();
+    const calls = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls;
+    const jsonCall = calls.find(([line]: [string]) => {
+      try {
+        JSON.parse(line);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    expect(jsonCall).toBeDefined();
+    const parsed = JSON.parse(jsonCall![0]);
+    expect(parsed.project.project_id).toBe("a3f7c2deadbeef");
+    expect(parsed.selected_agents).toEqual(["claude-code"]);
   });
 });

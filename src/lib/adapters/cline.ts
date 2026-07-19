@@ -29,28 +29,26 @@
  * user-authored hook and left untouched rather than clobbered — this is the
  * file-level analog of "merge preserving user keys" for a format with no
  * merge points.
+ *
+ * Cline is the one adapter whose hook *is* the script, so it writes the shared
+ * `bluud-pull-hook.sh` artifact under the name Cline requires (`TaskStart`).
+ * Everything else about the file — the marker, the fail-open contract, the
+ * unread stdin payload — comes from that one authored template rather than
+ * from a string built here.
  */
 
-import { chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { Adapter, AdapterEnv, AdapterPlan, AdapterResult, ApplyOptions } from "./types.js";
-import { atomicWriteFile, readTextFile } from "./writer.js";
+import {
+  applyHookScript,
+  planHookScript,
+  removeHookScript,
+  type HookScriptSpec,
+} from "./hookScript.js";
 
 const ADAPTER_NAME = "cline";
 const HOOK_FILE_NAME = "TaskStart";
-const MANAGED_MARKER = "# bluud:managed";
-
-/**
- * True when `content` contains the managed marker as one of its own lines.
- *
- * The marker cannot be the first line of the file (the shebang must occupy
- * line 1 for the OS to invoke the right interpreter), so this checks for an
- * exact line match rather than `startsWith`.
- */
-function isManagedByBluud(content: string): boolean {
-  return content.split("\n").some((line) => line.trim() === MANAGED_MARKER);
-}
 
 export const clineAdapter: Adapter = {
   name: ADAPTER_NAME,
@@ -62,24 +60,19 @@ export const clineAdapter: Adapter = {
 
   async plan(env: AdapterEnv): Promise<AdapterPlan> {
     const detected = await this.detect(env);
-    const hookPath = getHookPath(env);
-    const existing = await readTextFile(hookPath);
-    const foreignHook = existing !== null && !isManagedByBluud(existing);
-    const command = buildHookCommand(env.bluudBinary);
-    const wouldChange =
-      detected && !foreignHook && (existing === null || !existing.includes(command));
+    const script = await planHookScript(env, hookScriptSpec(env));
 
     return {
       name: ADAPTER_NAME,
       detected,
       actions: [
         {
-          path: hookPath,
-          description: foreignHook
+          path: script.path,
+          description: script.foreign
             ? "TaskStart hook (skipped — an existing user-authored hook is present)"
             : "TaskStart hook (Cline runs this on the next turn, not the first — see contextModification limitation)",
-          present: existing !== null,
-          wouldChange,
+          present: script.present,
+          wouldChange: detected && script.wouldChange,
         },
       ],
     };
@@ -94,27 +87,10 @@ export const clineAdapter: Adapter = {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
     }
 
-    const hookPath = getHookPath(env);
-    const existing = await readTextFile(hookPath);
-    const foreignHook = existing !== null && !isManagedByBluud(existing);
-    if (foreignHook) {
-      // Never overwrite a hook we did not write.
+    // Never overwrite a hook we did not write.
+    const scriptPath = await applyHookScript(env, hookScriptSpec(env));
+    if (scriptPath === null) {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
-    }
-
-    const command = buildHookCommand(env.bluudBinary);
-    if (existing === null || !existing.includes(command)) {
-      const script = [
-        "#!/usr/bin/env sh",
-        MANAGED_MARKER,
-        "# Managed by Bluud. Re-running `bluud` regenerates this file; a hand",
-        "# edit without the marker above is left untouched on the next run.",
-        "# Cline's TaskStart payload on stdin is not needed by `bluud pull`, so",
-        "# it is intentionally left unconsumed.",
-        `exec ${command}`,
-      ].join("\n");
-      await atomicWriteFile(hookPath, `${script}\n`);
-      await chmod(hookPath, 0o755);
     }
 
     return { name: ADAPTER_NAME, applied: true, actions: plan.actions };
@@ -131,16 +107,20 @@ function getHookPath(env: AdapterEnv): string {
   return join(getHooksDir(env), HOOK_FILE_NAME);
 }
 
-function buildHookCommand(bluudBinary: string): string {
-  return `${bluudBinary} pull --inject --format=cline`;
+/**
+ * Cline dictates both the file name (`TaskStart`, no extension) and the wire
+ * format (`{"contextModification": "..."}`), and documents hooks as unix-only —
+ * hence the forced POSIX template.
+ */
+function hookScriptSpec(env: AdapterEnv): HookScriptSpec {
+  return {
+    dir: getHooksDir(env),
+    fileName: HOOK_FILE_NAME,
+    format: "cline",
+    posix: true,
+  };
 }
 
 export async function uninstallCline(env: AdapterEnv): Promise<boolean> {
-  const hookPath = getHookPath(env);
-  const existing = await readTextFile(hookPath);
-  if (existing === null || !isManagedByBluud(existing)) return false;
-
-  const { rm } = await import("node:fs/promises");
-  await rm(hookPath, { force: true });
-  return true;
+  return removeHookScript(getHookPath(env));
 }

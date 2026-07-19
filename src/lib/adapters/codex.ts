@@ -13,7 +13,7 @@
  *
  *   [[hooks.SessionStart.hooks]]
  *   type = "command"
- *   command = '<bluud binary> pull --inject'
+ *   command = '<.codex/bluud/bluud-pull-hook.sh>'
  *
  * `matcher` filters on the hook's `source` field ("startup" | "resume" |
  * "clear" | "compact"); Codex's own docs use a `|`-delimited alternation
@@ -35,6 +35,15 @@ import {
   writeTomlMarkerBlockFile,
   removeTomlMarkerBlockFile,
 } from "./toml.js";
+import {
+  BLUUD_DIR_NAME,
+  applyHookScript,
+  hookScriptCommand,
+  hookScriptFileName,
+  planHookScript,
+  removeHookScript,
+  type HookScriptSpec,
+} from "./hookScript.js";
 
 const ADAPTER_NAME = "codex";
 const MARKER_SCOPE = "session-start";
@@ -49,13 +58,22 @@ export const codexAdapter: Adapter = {
   async plan(env: AdapterEnv): Promise<AdapterPlan> {
     const configPath = getConfigPath(env);
     const detected = await this.detect(env);
-    const command = buildHookCommand(env.bluudBinary);
+    const script = await planHookScript(env, hookScriptSpec(env));
+    const command = buildHookCommand(script.path);
     const wouldChange = detected && !(await tomlFileContains(configPath, command));
 
     return {
       name: ADAPTER_NAME,
       detected,
       actions: [
+        {
+          path: script.path,
+          description: script.foreign
+            ? "Bluud pull hook script (skipped — an existing user-authored script is present)"
+            : "Bluud pull hook script",
+          present: script.present,
+          wouldChange: detected && script.wouldChange,
+        },
         {
           path: configPath,
           description: env.global
@@ -77,8 +95,13 @@ export const codexAdapter: Adapter = {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
     }
 
+    const scriptPath = await applyHookScript(env, hookScriptSpec(env));
+    if (scriptPath === null) {
+      return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
+    }
+
     const configPath = getConfigPath(env);
-    const command = buildHookCommand(env.bluudBinary);
+    const command = buildHookCommand(scriptPath);
     const alreadyPresent = await tomlFileContains(configPath, command);
 
     if (!alreadyPresent) {
@@ -105,12 +128,23 @@ function getConfigPath(env: AdapterEnv): string {
   return join(getConfigDir(env), "config.toml");
 }
 
-function buildHookCommand(bluudBinary: string): string {
-  return `${bluudBinary} pull --inject`;
+/** Codex folds plain stdout into `additionalContext`, so no `--format`. */
+function hookScriptSpec(env: AdapterEnv): HookScriptSpec {
+  return { dir: join(getConfigDir(env), BLUUD_DIR_NAME) };
+}
+
+function getScriptPath(env: AdapterEnv): string {
+  return join(getConfigDir(env), BLUUD_DIR_NAME, hookScriptFileName(process.platform !== "win32"));
+}
+
+function buildHookCommand(scriptPath: string): string {
+  return hookScriptCommand(scriptPath);
 }
 
 export async function uninstallCodex(env: AdapterEnv): Promise<boolean> {
+  const removedScript = await removeHookScript(getScriptPath(env));
   const configPath = getConfigPath(env);
-  if (!existsSync(configPath)) return false;
-  return removeTomlMarkerBlockFile(configPath, MARKER_SCOPE);
+  if (!existsSync(configPath)) return removedScript;
+  const removedBlock = await removeTomlMarkerBlockFile(configPath, MARKER_SCOPE);
+  return removedBlock || removedScript;
 }

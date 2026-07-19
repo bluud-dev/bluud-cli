@@ -17,6 +17,8 @@ export type ErrorCode =
   | "project_limit_exceeded"
   | "subscription_required"
   | "project_locked"
+  | "not_owner"
+  | "not_member"
   | "cancelled"
   | "unknown";
 
@@ -45,18 +47,29 @@ export class CliError extends Error {
 /**
  * Map an HTTP status to the CLI's error taxonomy.
  *
- * The backend's typed `{code, message}` detail is preferred by the API client;
- * this is the fallback when a response carries no machine-readable code (or
- * none that maps to our vocabulary). `402`/`403` collapse to
- * `subscription_required` because every paid-gated CLI command surfaces that
- * way; `423 Locked` is the read-only quota state from concept §9.2.
+ * The backend's typed `{code, message}` detail is preferred by the API client
+ * (`isKnownErrorCode` in `api.ts`); this is only the fallback for a response
+ * that carries no machine-readable code. `402` still collapses to
+ * `subscription_required` for a genuine payment-required response with no
+ * code. `403`, however, does **not** default to `subscription_required`:
+ * every real paid-gate rejection (`require_dashboard_*`, remap's
+ * `_require_paid_subscription`, project registration's tier limit) already
+ * sends an explicit `{code: "subscription_required", ...}` object, so a 403
+ * that reaches this fallback is always one of the *un-coded* plain-string
+ * 403s from `require_project_owner`/`require_project_member`
+ * (`backend/app/security/deps.py`) — an ownership or membership rejection
+ * that has nothing to do with billing. Guessing `subscription_required` here
+ * previously appended a "This needs a paid plan" hint underneath an
+ * already-clear "Only the project owner can perform this action" message,
+ * which was actively misleading. `api_error` carries no extra guidance, so
+ * the backend's own message stands on its own. `423 Locked` is the read-only
+ * quota state from concept §9.2.
  */
 export function statusToErrorCode(status: number): ErrorCode {
   switch (status) {
     case 401:
       return "auth_required";
     case 402:
-    case 403:
       return "subscription_required";
     case 404:
       return "project_not_found";
@@ -86,6 +99,8 @@ const ERROR_GUIDANCE: Record<ErrorCode, string | null> = {
   subscription_required: "This needs a paid plan. Manage it at https://bluud.dev/settings/billing.",
   project_locked:
     "This project is read-only (storage full). Free up space or upgrade to write again.",
+  not_owner: "Only the project owner can do this. Ask them to run it, or use `bluud reassign`.",
+  not_member: "You're not a member of this project. Ask the owner to invite you.",
   cancelled: null,
   unknown: null,
 };

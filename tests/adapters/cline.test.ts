@@ -54,9 +54,13 @@ describe("clineAdapter", () => {
 
     const hookPath = join(cwd, ".clinerules", "hooks", "TaskStart");
     const content = await readFile(hookPath, "utf8");
-    expect(content).toContain("#!/usr/bin/env sh");
+    expect(content.startsWith("#!/usr/bin/env sh")).toBe(true);
     expect(content).toContain("# bluud:managed");
-    expect(content).toContain("exec /usr/local/bin/bluud pull --inject --format=cline");
+    expect(content).toContain("BLUUD_BINARY='/usr/local/bin/bluud'");
+    expect(content).toContain("BLUUD_FORMAT='cline'");
+    // The POSIX template must never pick up CRLF — the kernel would look for
+    // an interpreter named `sh\r`.
+    expect(content).not.toContain("\r");
   });
 
   it("writes to the global Documents/Cline/Rules/Hooks path in global scope", async () => {

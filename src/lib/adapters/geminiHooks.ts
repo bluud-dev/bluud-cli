@@ -21,9 +21,24 @@
  * `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}`
  * envelope instead of plain text (see `renderGeminiHookOutput` in
  * `lib/memory.ts`) to satisfy that contract.
+ *
+ * That contract is also why the entry points at a materialized hook script
+ * rather than `bluud` directly: a failed pull must print nothing at all rather
+ * than exit non-zero mid-parse. See `hookScript.ts`.
+ *
+ * Both adapters share `~/.gemini/bluud/`, so the script — like the settings
+ * entry — is written once and covers both.
  */
 
+import { join } from "node:path";
 import { mergeJsonFile, readTextFile } from "./writer.js";
+import {
+  BLUUD_DIR_NAME,
+  hookScriptCommand,
+  hookScriptFileName,
+  type HookScriptSpec,
+} from "./hookScript.js";
+import type { AdapterEnv } from "./types.js";
 
 export interface GeminiHookEntry {
   type: "command";
@@ -38,26 +53,50 @@ export interface GeminiSettings extends Record<string, unknown> {
   };
 }
 
-export function buildGeminiHookCommand(bluudBinary: string): string {
-  return `${bluudBinary} pull --inject --format=gemini`;
+/**
+ * The Gemini-family script directory: alongside the settings file it serves.
+ *
+ * Antigravity has no project-scoped hook surface (it is global-only), so in
+ * the scope where the two adapters overlap they resolve to the same
+ * `~/.gemini/bluud/` directory and one script covers both — the same
+ * "writing it once covers both" property the shared settings entry has.
+ */
+export function geminiHookScriptSpec(env: AdapterEnv): HookScriptSpec {
+  return { dir: join(geminiConfigDir(env), BLUUD_DIR_NAME), format: "gemini" };
 }
 
-export async function hasGeminiHook(settingsPath: string, bluudBinary: string): Promise<boolean> {
+export function geminiHookScriptPath(env: AdapterEnv): string {
+  return join(
+    geminiConfigDir(env),
+    BLUUD_DIR_NAME,
+    hookScriptFileName(process.platform !== "win32"),
+  );
+}
+
+function geminiConfigDir(env: AdapterEnv): string {
+  return env.global ? join(env.home, ".gemini") : join(env.cwd, ".gemini");
+}
+
+export function buildGeminiHookCommand(scriptPath: string): string {
+  return hookScriptCommand(scriptPath);
+}
+
+export async function hasGeminiHook(settingsPath: string, scriptPath: string): Promise<boolean> {
   const text = await readTextFile(settingsPath);
   if (text === null) return false;
-  return text.includes(buildGeminiHookCommand(bluudBinary));
+  return text.includes(buildGeminiHookCommand(scriptPath));
 }
 
 export async function applyGeminiSessionStartHook(
   settingsPath: string,
-  bluudBinary: string,
+  scriptPath: string,
   hookName: string,
 ): Promise<void> {
   await mergeJsonFile<GeminiSettings>(settingsPath, (current) => {
     const next = { ...current };
     next.hooks = { ...next.hooks };
     const existingEntries = next.hooks.SessionStart ?? [];
-    const command = buildGeminiHookCommand(bluudBinary);
+    const command = buildGeminiHookCommand(scriptPath);
     const alreadyPresent = existingEntries.some(
       (entry) => entry.type === "command" && entry.command === command,
     );
@@ -70,7 +109,7 @@ export async function applyGeminiSessionStartHook(
 
 export async function removeGeminiSessionStartHook(
   settingsPath: string,
-  bluudBinary: string,
+  scriptPath: string,
 ): Promise<boolean> {
   const existing = await readTextFile(settingsPath);
   if (existing === null) return false;
@@ -78,7 +117,7 @@ export async function removeGeminiSessionStartHook(
   let changed = false;
   await mergeJsonFile<GeminiSettings>(settingsPath, (current) => {
     if (!current.hooks?.SessionStart) return current;
-    const command = buildGeminiHookCommand(bluudBinary);
+    const command = buildGeminiHookCommand(scriptPath);
     const next = { ...current };
     next.hooks = { ...next.hooks };
     const before = next.hooks.SessionStart ?? [];

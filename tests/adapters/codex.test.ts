@@ -4,7 +4,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { codexAdapter, uninstallCodex } from "../../src/lib/adapters/codex.js";
+import { hookScriptCommand, hookScriptFileName } from "../../src/lib/adapters/hookScript.js";
 import type { AdapterEnv } from "../../src/lib/adapters/types.js";
+
+function scriptPath(configDir: string): string {
+  return join(configDir, "bluud", hookScriptFileName(process.platform !== "win32"));
+}
+
+/** The config-file action; index 0 is the materialized hook script. */
+const CONFIG_ACTION = 1;
 
 let home: string;
 let cwd: string;
@@ -39,7 +47,8 @@ describe("codexAdapter", () => {
     expect(content).toContain('matcher = "startup|resume"');
     expect(content).toContain("[[hooks.SessionStart.hooks]]");
     expect(content).toContain('type = "command"');
-    expect(content).toContain("command = '/usr/local/bin/bluud pull --inject'");
+    expect(content).toContain(`command = '${hookScriptCommand(scriptPath(join(cwd, ".codex")))}'`);
+    expect(existsSync(scriptPath(join(cwd, ".codex")))).toBe(true);
   });
 
   it("preserves unrelated existing TOML content (model, other mcp_servers)", async () => {
@@ -85,8 +94,8 @@ describe("codexAdapter", () => {
     await mkdir(join(home, ".codex"), { recursive: true });
 
     const plan = await codexAdapter.plan(env);
-    expect(plan.actions[0].description).not.toContain("trust");
-    expect(plan.actions[0].path).toBe(join(home, ".codex", "config.toml"));
+    expect(plan.actions[CONFIG_ACTION].description).not.toContain("trust");
+    expect(plan.actions[CONFIG_ACTION].path).toBe(join(home, ".codex", "config.toml"));
   });
 
   it("flags the repo-trust caveat for project scope", async () => {
@@ -94,7 +103,8 @@ describe("codexAdapter", () => {
     await mkdir(join(cwd, ".codex"), { recursive: true });
 
     const plan = await codexAdapter.plan(env);
-    expect(plan.actions[0].description).toContain("trust");
+    expect(plan.actions[CONFIG_ACTION].description).toContain("trust");
+    expect(plan.actions[0].description).toContain("hook script");
   });
 
   it("uninstallCodex removes the block and preserves everything else", async () => {
@@ -110,5 +120,6 @@ describe("codexAdapter", () => {
     const content = await readFile(configPath, "utf8");
     expect(content).toContain('model = "gpt-5-codex"');
     expect(content).not.toContain("hooks.SessionStart");
+    expect(existsSync(scriptPath(join(cwd, ".codex")))).toBe(false);
   });
 });

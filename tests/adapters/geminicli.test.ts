@@ -4,7 +4,12 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { geminiCliAdapter, uninstallGeminiCli } from "../../src/lib/adapters/geminicli.js";
+import { hookScriptCommand, hookScriptFileName } from "../../src/lib/adapters/hookScript.js";
 import type { AdapterEnv } from "../../src/lib/adapters/types.js";
+
+function scriptPath(configDir: string): string {
+  return join(configDir, "bluud", hookScriptFileName(process.platform !== "win32"));
+}
 
 let home: string;
 let cwd: string;
@@ -38,11 +43,22 @@ describe("geminiCliAdapter", () => {
     expect(settings.hooks.SessionStart).toEqual([
       {
         type: "command",
-        command: "/usr/local/bin/bluud pull --inject --format=gemini",
+        command: hookScriptCommand(scriptPath(join(cwd, ".gemini"))),
         name: "bluud-memory-pull",
         timeout: 15000,
       },
     ]);
+  });
+
+  it("materializes a script that requests the gemini JSON envelope", async () => {
+    const env = await makeEnv();
+    await mkdir(join(cwd, ".gemini"), { recursive: true });
+
+    await geminiCliAdapter.apply(env, { dryRun: false, force: false });
+
+    const content = await readFile(scriptPath(join(cwd, ".gemini")), "utf8");
+    // POSIX renders `BLUUD_FORMAT='gemini'`, cmd renders `set "BLUUD_FORMAT=gemini"`.
+    expect(content).toMatch(/BLUUD_FORMAT='?gemini/);
   });
 
   it("preserves unrelated existing settings keys", async () => {
@@ -95,5 +111,6 @@ describe("geminiCliAdapter", () => {
 
     const settings = JSON.parse(await readFile(settingsPath, "utf8"));
     expect(settings.hooks.SessionStart).toEqual([{ type: "command", command: "some-other-tool" }]);
+    expect(existsSync(scriptPath(join(cwd, ".gemini")))).toBe(false);
   });
 });

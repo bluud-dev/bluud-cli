@@ -4,7 +4,15 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { kimiAdapter, uninstallKimi } from "../../src/lib/adapters/kimi.js";
+import { hookScriptCommand, hookScriptFileName } from "../../src/lib/adapters/hookScript.js";
 import type { AdapterEnv } from "../../src/lib/adapters/types.js";
+
+function scriptPath(configDir: string): string {
+  return join(configDir, "bluud", hookScriptFileName(process.platform !== "win32"));
+}
+
+/** The config-file action; index 0 is the materialized hook script. */
+const CONFIG_ACTION = 1;
 
 let home: string;
 let cwd: string;
@@ -43,8 +51,11 @@ describe("kimiAdapter", () => {
     const content = await readFile(configPath, "utf8");
     expect(content).toContain("[[hooks]]");
     expect(content).toContain('event = "UserPromptSubmit"');
-    expect(content).toContain("command = '/usr/local/bin/bluud pull --inject'");
+    expect(content).toContain(
+      `command = '${hookScriptCommand(scriptPath(join(home, ".kimi-code")))}'`,
+    );
     expect(content).not.toContain('event = "SessionStart"');
+    expect(existsSync(scriptPath(join(home, ".kimi-code")))).toBe(true);
   });
 
   it("the plan description documents why UserPromptSubmit is used instead of SessionStart", async () => {
@@ -52,8 +63,9 @@ describe("kimiAdapter", () => {
     await mkdir(join(home, ".kimi-code"), { recursive: true });
 
     const plan = await kimiAdapter.plan(env);
-    expect(plan.actions[0].description).toContain("UserPromptSubmit");
-    expect(plan.actions[0].description).toContain("SessionStart cannot inject context");
+    expect(plan.actions[CONFIG_ACTION].description).toContain("UserPromptSubmit");
+    expect(plan.actions[CONFIG_ACTION].description).toContain("SessionStart cannot inject context");
+    expect(plan.actions[0].description).toContain("hook script");
   });
 
   it("is idempotent: re-applying does not duplicate the block", async () => {

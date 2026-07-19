@@ -14,6 +14,16 @@ import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import os from "node:os";
+/**
+ * The skill's identity. This must equal the `name` in the bundled
+ * `SKILL.md` frontmatter: `skills` resolves `--skill <name>` against the
+ * frontmatter (`filterSkills` in its `src/skills.ts`), and it rejects outright
+ * any SKILL.md whose frontmatter lacks a string `name`/`description`. A
+ * mismatch surfaces only as "No valid skills found" at install time, so the
+ * value lives here once and is asserted against the file by `skill.test.ts`.
+ */
+export const BLUUD_SKILL_NAME = "bluud-memory";
+
 export interface SkillsInstallOptions {
   skillName: string;
   skillPath: string;
@@ -21,6 +31,8 @@ export interface SkillsInstallOptions {
   global?: boolean;
   copy?: boolean;
   cwd?: string;
+  /** When true, determine what would happen but write nothing (`--dry-run`). */
+  dryRun?: boolean;
 }
 
 export interface SkillsInstallResult {
@@ -33,6 +45,11 @@ export interface SkillsInstallResult {
 /**
  * Try to install a skill via `npx skills`.  If the tool is missing or the call
  * fails, fall back to a direct copy into the agent's canonical skill dir.
+ *
+ * With `dryRun: true`, this only probes whether `npx skills` would be used
+ * (a read-only `commandExists` check) and reports the predicted mode without
+ * spawning the installer or touching the filesystem — mirroring the
+ * gortex-style `Plan`/`Apply` split the hook adapters already honor.
  */
 export async function installSkill(options: SkillsInstallOptions): Promise<SkillsInstallResult> {
   const {
@@ -42,9 +59,25 @@ export async function installSkill(options: SkillsInstallOptions): Promise<Skill
     global = false,
     copy = false,
     cwd = process.cwd(),
+    dryRun = false,
   } = options;
 
   const skillsAvailable = await commandExists("npx");
+
+  if (dryRun) {
+    const predictedMode = skillsAvailable
+      ? "skills"
+      : resolveSkillTargetDir(agent, global, cwd)
+        ? "copy"
+        : "skipped";
+    return {
+      agent,
+      installed: false,
+      mode: predictedMode,
+      message: "dry run — no changes written",
+    };
+  }
+
   if (skillsAvailable) {
     try {
       await runSkillsAdd({ skillPath, agent, global, copy });
@@ -74,7 +107,7 @@ async function runSkillsAdd(options: {
     "add",
     options.skillPath,
     "--skill",
-    "bluud-memory",
+    BLUUD_SKILL_NAME,
     "-a",
     options.agent,
     "-y",
@@ -130,7 +163,7 @@ async function manualCopyInstall(options: {
  * `skills` itself is unavailable.  It is intentionally conservative: only the
  * surfaces documented in `BLUUD_CLI_ARCHITECTURE.md` are supported here.
  */
-function resolveSkillTargetDir(agent: string, global: boolean, cwd: string): string | null {
+export function resolveSkillTargetDir(agent: string, global: boolean, cwd: string): string | null {
   const home = os.homedir();
   const registry: Record<string, { project: string; global: string | null }> = {
     "claude-code": { project: ".claude/skills", global: join(home, ".claude", "skills") },
@@ -155,6 +188,20 @@ function resolveSkillTargetDir(agent: string, global: boolean, cwd: string): str
     return entry.global;
   }
   return resolve(cwd, entry.project);
+}
+
+/**
+ * Whether the Bluud skill appears installed for `agent` at its known target
+ * directory (the same location `installSkill`/`manualCopyInstall` write to).
+ * Read-only — used by `bluud doctor` to report per-tool skill-delivery drift
+ * without writing anything. Agents with no known manual target (only reached
+ * via `npx skills`'s own ~75-tool registry) resolve to `false` rather than
+ * throwing, since Bluud has no visibility into that tool's directory layout.
+ */
+export function isSkillInstalled(agent: string, global: boolean, cwd: string): boolean {
+  const targetDir = resolveSkillTargetDir(agent, global, cwd);
+  if (!targetDir) return false;
+  return existsSync(join(targetDir, BLUUD_SKILL_NAME));
 }
 
 export async function commandExists(command: string): Promise<boolean> {
@@ -208,8 +255,28 @@ export async function readSymlink(path: string): Promise<string | null> {
 }
 
 export function bundledSkillPath(): string {
+  return bundledAssetPath("skill");
+}
+
+/**
+ * Absolute path to the bundled hook-script templates (`bluud-pull-hook.sh` /
+ * `bluud-pull-hook.cmd`). These are package assets read at install time and
+ * materialized into each tool's own config directory — they are never executed
+ * from here, because the package directory is volatile under `npx` (see
+ * `hookScript.ts`).
+ */
+export function bundledHooksPath(): string {
+  return bundledAssetPath("hooks");
+}
+
+/**
+ * Resolve a directory shipped alongside the bundle. `dist/<name>` is preferred
+ * (what `tsup` emits and what `package.json#files` publishes); `src/<name>` is
+ * the fallback for running straight from a source checkout.
+ */
+function bundledAssetPath(name: string): string {
   const packageRoot = findPackageRoot();
-  const candidates = [resolve(packageRoot, "dist", "skill"), resolve(packageRoot, "src", "skill")];
+  const candidates = [resolve(packageRoot, "dist", name), resolve(packageRoot, "src", name)];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }

@@ -127,7 +127,9 @@ describe("pushCommand", () => {
       cwd: tempProject,
       api: { pushMemory } as unknown as ApiClient,
       stdin: createStdin(
-        JSON.stringify({ operations: [{ op: "create", document: "---\ntitle: X\ndescription: Y\n---\nZ." }] }),
+        JSON.stringify({
+          operations: [{ op: "create", document: "---\ntitle: X\ndescription: Y\n---\nZ." }],
+        }),
       ),
     });
 
@@ -141,9 +143,9 @@ describe("pushCommand", () => {
 
   it("handles 423 Locked gracefully", async () => {
     await setupProjectToken(tempProject);
-    const pushMemory = vi.fn().mockRejectedValue(
-      new CliError("Project is read-only", { code: "project_locked" }),
-    );
+    const pushMemory = vi
+      .fn()
+      .mockRejectedValue(new CliError("Project is read-only", { code: "project_locked" }));
     const ctx = makeContext({
       cwd: tempProject,
       api: { pushMemory } as unknown as ApiClient,

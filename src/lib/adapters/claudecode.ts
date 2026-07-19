@@ -11,6 +11,10 @@
  * (or using "*") matches every SessionStart source. Bluud omits it so memory
  * is refreshed on every source, not just a fresh `claude` launch. Plain stdout
  * text from the command is automatically added as context for this event.
+ *
+ * The stored command invokes the materialized hook script in `.claude/bluud/`
+ * rather than `bluud` directly — see `hookScript.ts` for why (stable path plus
+ * the section 9.1 fail-open contract).
  */
 
 import { join } from "node:path";
@@ -21,10 +25,26 @@ import {
   writeMarkerBlockFile,
   removeMarkerBlockFile,
   readTextFile,
+  markerBlock,
 } from "./writer.js";
+import {
+  BLUUD_DIR_NAME,
+  applyHookScript,
+  hookScriptCommand,
+  hookScriptFileName,
+  planHookScript,
+  removeHookScript,
+  type HookScriptSpec,
+} from "./hookScript.js";
 
 const ADAPTER_NAME = "claude-code";
-const MARKER_SCOPE = "session-start";
+// Scope for the CLAUDE.md instruction block (see `markerBlock`), producing
+// `<!-- bluud:memory:start -->` / `<!-- bluud:memory:end -->`. Both the write
+// and remove side must derive markers from this same scope — a previous
+// version hardcoded the write-side markers as literal strings while the
+// remove side built them from a *different* scope string ("session-start"),
+// so `uninstallClaudeCode` never matched and silently left the block behind.
+const MARKER_SCOPE = "memory";
 
 interface ClaudeHookEntry {
   type: "command";
@@ -53,12 +73,21 @@ export const claudeCodeAdapter: Adapter = {
     const settingsPath = getSettingsPath(env);
     const detected = await this.detect(env);
     const existing = await readTextFile(settingsPath);
-    const wouldChange = detected && !hasHook(existing, env.bluudBinary);
+    const script = await planHookScript(env, hookScriptSpec(env));
+    const wouldChange = detected && !hasHook(existing, script.path);
 
     return {
       name: ADAPTER_NAME,
       detected,
       actions: [
+        {
+          path: script.path,
+          description: script.foreign
+            ? "Bluud pull hook script (skipped — an existing user-authored script is present)"
+            : "Bluud pull hook script",
+          present: script.present,
+          wouldChange: detected && script.wouldChange,
+        },
         {
           path: settingsPath,
           description: "SessionStart hook in Claude Code settings",
@@ -81,12 +110,19 @@ export const claudeCodeAdapter: Adapter = {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
     }
 
+    const scriptPath = await applyHookScript(env, hookScriptSpec(env));
+    if (scriptPath === null) {
+      // A user-authored script occupies the path; wiring settings.json to it
+      // would hand the session to a file Bluud does not control.
+      return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
+    }
+
     // Write the SessionStart hook via JSON merge so unrelated settings are preserved.
     await mergeJsonFile<ClaudeSettings>(settingsPath, (current) => {
       const next = { ...current };
       next.hooks = { ...next.hooks };
       const existingEntries = next.hooks.SessionStart ?? [];
-      const command = buildHookCommand(env.bluudBinary);
+      const command = buildHookCommand(scriptPath);
       const alreadyPresent = existingEntries.some((entry) =>
         entry.hooks.some((h) => h.type === "command" && h.command === command),
       );
@@ -99,11 +135,13 @@ export const claudeCodeAdapter: Adapter = {
     });
 
     // Also write a marker-guarded instruction block for human-readable context.
-    await writeMarkerBlockFile(join(getConfigDir(env), "CLAUDE.md"), {
-      startMarker: "<!-- bluud:memory:start -->",
-      endMarker: "<!-- bluud:memory:end -->",
-      content: `This Claude Code installation is managed by Bluud.\nProject memory is injected automatically via a SessionStart hook.`,
-    });
+    await writeMarkerBlockFile(
+      join(getConfigDir(env), "CLAUDE.md"),
+      markerBlock(
+        MARKER_SCOPE,
+        `This Claude Code installation is managed by Bluud.\nProject memory is injected automatically via a SessionStart hook.`,
+      ),
+    );
 
     return { name: ADAPTER_NAME, applied: true, actions: plan.actions };
   },
@@ -119,13 +157,22 @@ function getSettingsPath(env: AdapterEnv): string {
     : join(env.cwd, ".claude", "settings.local.json");
 }
 
-function buildHookCommand(bluudBinary: string): string {
-  return `${bluudBinary} pull --inject`;
+/** Claude Code consumes plain stdout as context, so no `--format` is needed. */
+function hookScriptSpec(env: AdapterEnv): HookScriptSpec {
+  return { dir: join(getConfigDir(env), BLUUD_DIR_NAME) };
 }
 
-function hasHook(text: string | null, bluudBinary: string): boolean {
+function getScriptPath(env: AdapterEnv): string {
+  return join(getConfigDir(env), BLUUD_DIR_NAME, hookScriptFileName(process.platform !== "win32"));
+}
+
+function buildHookCommand(scriptPath: string): string {
+  return hookScriptCommand(scriptPath);
+}
+
+function hasHook(text: string | null, scriptPath: string): boolean {
   if (text === null) return false;
-  return text.includes(buildHookCommand(bluudBinary));
+  return text.includes(buildHookCommand(scriptPath));
 }
 
 export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
@@ -134,14 +181,16 @@ export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
     join(getConfigDir(env), "CLAUDE.md"),
     MARKER_SCOPE,
   );
+  const scriptPath = getScriptPath(env);
+  const removedScript = await removeHookScript(scriptPath);
 
   const existing = await readTextFile(settingsPath);
-  if (existing === null) return removedMarker;
+  if (existing === null) return removedMarker || removedScript;
 
   let changed = false;
   await mergeJsonFile<ClaudeSettings>(settingsPath, (current) => {
     if (!current.hooks?.SessionStart) return current;
-    const command = buildHookCommand(env.bluudBinary);
+    const command = buildHookCommand(scriptPath);
     const next = { ...current };
     next.hooks = { ...next.hooks };
     const before = next.hooks.SessionStart ?? [];
@@ -158,5 +207,5 @@ export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
     return next;
   });
 
-  return changed || removedMarker;
+  return changed || removedMarker || removedScript;
 }

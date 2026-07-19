@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { antigravityAdapter, uninstallAntigravity } from "../../src/lib/adapters/antigravity.js";
 import { geminiCliAdapter } from "../../src/lib/adapters/geminicli.js";
+import { hookScriptCommand, hookScriptFileName } from "../../src/lib/adapters/hookScript.js";
 import type { AdapterEnv } from "../../src/lib/adapters/types.js";
+
+function scriptPath(configDir: string): string {
+  return join(configDir, "bluud", hookScriptFileName(process.platform !== "win32"));
+}
 
 let home: string;
 let cwd: string;
@@ -45,7 +50,7 @@ describe("antigravityAdapter", () => {
     expect(settings.hooks.SessionStart).toEqual([
       {
         type: "command",
-        command: "/usr/local/bin/bluud pull --inject --format=gemini",
+        command: hookScriptCommand(scriptPath(join(home, ".gemini"))),
         name: "bluud-memory-pull",
         timeout: 15000,
       },
@@ -65,6 +70,8 @@ describe("antigravityAdapter", () => {
     const settingsPath = join(home, ".gemini", "settings.json");
     const settings = JSON.parse(await readFile(settingsPath, "utf8"));
     expect(settings.hooks.SessionStart).toHaveLength(1);
+    // The two adapters also share the one materialized script in this scope.
+    expect(existsSync(scriptPath(join(home, ".gemini")))).toBe(true);
   });
 
   it("preserves unrelated existing settings keys", async () => {

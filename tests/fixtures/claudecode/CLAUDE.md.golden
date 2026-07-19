@@ -1,0 +1,4 @@
+<!-- bluud:memory:start -->
+This Claude Code installation is managed by Bluud.
+Project memory is injected automatically via a SessionStart hook.
+<!-- bluud:memory:end -->

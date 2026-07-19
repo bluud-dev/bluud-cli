@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"__CWD__/.claude/bluud/bluud-pull-hook.cmd\""
+          }
+        ]
+      }
+    ]
+  }
+}

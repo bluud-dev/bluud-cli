@@ -8,7 +8,13 @@ vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
 }));
 
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, symlink: vi.fn(actual.symlink) };
+});
+
 import { spawn } from "node:child_process";
+import { symlink as symlinkMock } from "node:fs/promises";
 import {
   installSkill,
   commandExists,
@@ -246,6 +252,31 @@ describe("createSymlinkOrCopy / readSymlink", () => {
 
   it("returns null from readSymlink for a missing path", async () => {
     expect(await readSymlink(join(workDir, "does-not-exist"))).toBeNull();
+  });
+
+  it("falls back to a recursive copy when symlink() rejects (Windows without Developer Mode/admin, EPERM)", async () => {
+    const symlinkSpy = vi
+      .mocked(symlinkMock)
+      .mockRejectedValueOnce(
+        Object.assign(new Error("EPERM: operation not permitted, symlink"), { code: "EPERM" }),
+      );
+
+    const target = join(workDir, "canonical-eperm");
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, "SKILL.md"), "copied-not-linked", "utf8");
+    const linkPath = join(workDir, "linked-eperm");
+
+    await createSymlinkOrCopy(target, linkPath);
+
+    const expectedType = process.platform === "win32" ? "junction" : "dir";
+    expect(symlinkSpy).toHaveBeenCalledWith(target, linkPath, expectedType);
+    // The fallback is a real, independent copy: mutating the target afterward
+    // must not affect the link path, which a symlink would have reflected.
+    expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toBe("copied-not-linked");
+    await writeFile(join(target, "SKILL.md"), "mutated-after-copy", "utf8");
+    expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toBe("copied-not-linked");
+
+    symlinkSpy.mockRestore();
   });
 });
 

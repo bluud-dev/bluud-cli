@@ -9,3 +9,11 @@
 # the source of truth honest rather than being the only line of defense.
 *.cmd text eol=crlf
 *.sh  text eol=lf
+
+# Golden fixtures capture renderHookScript's exact output bytes, including
+# line endings, for tests/adapters/goldenFixtures.test.ts. The same
+# autocrlf hazard applies: without pinning, a checkout could silently flip
+# the fixture's line endings and the test would compare against the wrong
+# bytes rather than catching a real regression.
+tests/fixtures/hookScript/windows.cmd.golden text eol=crlf
+tests/fixtures/hookScript/posix*.golden      text eol=lf

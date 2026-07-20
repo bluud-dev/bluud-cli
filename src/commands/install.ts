@@ -36,20 +36,14 @@ import { applyAll } from "../lib/adapters/index.js";
 import type { AdapterEnv, AdapterResult } from "../lib/adapters/types.js";
 import { CliError } from "../lib/error.js";
 import { getFlagBoolean, getFlagArray, getFlagString } from "../lib/args.js";
+import { supportedAgentNames } from "../lib/agentRegistry.js";
 import type { Command, CommandContext } from "./index.js";
 
-const SUPPORTED_AGENTS = [
-  "claude-code",
-  "codex",
-  "gemini-cli",
-  "antigravity",
-  "kimi-code-cli",
-  "cline",
-  "cursor",
-  "windsurf",
-  "aider",
-  "github-copilot",
-];
+// Every tool Bluud can detect and deliver its skill into — the full native
+// registry in `agentRegistry.ts`, plus `aider` (detected but unsupported; see
+// that module's header). Sourced from one place so `install`/`doctor`/
+// `uninstall` can never disagree about which tools exist.
+const SUPPORTED_AGENTS = supportedAgentNames();
 
 export const installCommand: Command = {
   name: "install",

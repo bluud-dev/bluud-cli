@@ -4,6 +4,7 @@
 
 import * as p from "@clack/prompts";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import os from "node:os";
 import { CliError } from "../lib/error.js";
 import { uninstallClaudeCode } from "../lib/adapters/claudecode.js";
@@ -15,20 +16,13 @@ import { uninstallCline } from "../lib/adapters/cline.js";
 import { adapters as hookAdapters } from "../lib/adapters/index.js";
 import type { AdapterEnv } from "../lib/adapters/types.js";
 import { getFlagArray, getFlagBoolean } from "../lib/args.js";
+import { BLUUD_SKILL_NAME, resolveSkillTargetDir } from "../lib/skills.js";
+import { supportedAgentNames } from "../lib/agentRegistry.js";
 import type { Command, CommandContext } from "./index.js";
 
-const SUPPORTED_AGENTS = [
-  "claude-code",
-  "codex",
-  "gemini-cli",
-  "antigravity",
-  "kimi-code-cli",
-  "cline",
-  "cursor",
-  "windsurf",
-  "aider",
-  "github-copilot",
-];
+// Sourced from the same registry `install.ts`/`doctor.ts` use — see
+// `agentRegistry.ts`'s header for why this replaced a hand-duplicated array.
+const SUPPORTED_AGENTS = supportedAgentNames();
 
 const ADAPTER_UNINSTALLERS: Partial<Record<string, (env: AdapterEnv) => Promise<boolean>>> = {
   "claude-code": uninstallClaudeCode,
@@ -72,7 +66,7 @@ export const uninstallCommand: Command = {
 
     const reports: UninstallReport[] = [];
     for (const agent of agents) {
-      const skillWasInstalled = skillFilesPresent(agent, ctx.cwd, home);
+      const skillWasInstalled = skillFilesPresent(agent, ctx.cwd);
       const hookUninstaller = ADAPTER_UNINSTALLERS[agent];
       let hookWasConfigured = false;
       if (hookUninstaller) {
@@ -83,7 +77,7 @@ export const uninstallCommand: Command = {
       let hookRemoved = false;
       if (!dryRun) {
         if (skillWasInstalled) {
-          await removeSkillFiles(agent, ctx.cwd, home);
+          await removeSkillFiles(agent, ctx.cwd);
           skillRemoved = true;
         }
         if (hookUninstaller) {
@@ -160,60 +154,40 @@ async function selectAgents(ctx: CommandContext): Promise<string[]> {
 }
 
 /**
- * The exact per-agent skill file/directory targets removed by
- * `removeSkillFiles`. Kept separate from `skills.ts`'s `resolveSkillTargetDir`
- * (used by the *install* copy-fallback) because the two intentionally diverge
- * for the four non-hook, single-surface tools: Cursor/Windsurf/Aider/GitHub
- * Copilot are each a single instruction file (`.windsurfrules`, `AIDER.md`,
- * …) rather than a directory holding a nested `bluud-memory` skill package.
+ * The per-agent skill directory removed by `removeSkillFiles`, resolved from
+ * the same native registry (`agentRegistry.ts`, via `skills.ts`'s
+ * `resolveSkillTargetDir`) that `install.ts` writes to.
+ *
+ * This used to be a separate, hand-maintained map that had drifted from the
+ * install side: it pointed cursor/windsurf/aider/github-copilot at single
+ * *instruction files* (`.cursor/rules/bluud-memory.mdc`, `.windsurfrules`,
+ * `AIDER.md`, `.github/copilot-instructions.md`) when the actual install
+ * target for all of them (aider excepted — it has none) is a *directory*
+ * holding the `bluud-memory` skill package, and it hardcoded codex's project
+ * dir as `.codex/skills` (install writes `.agents/skills`) and both codex's
+ * and claude-code's global dirs without honoring `CODEX_HOME`/
+ * `CLAUDE_CONFIG_DIR`. Resolving through the shared registry makes that class
+ * of drift structurally impossible: uninstall now always agrees with
+ * whatever install actually did.
  */
-function skillTargets(
-  agent: string,
-  cwd: string,
-  home: string,
-): { project: string; global: string | null } | null {
-  const targets: Record<string, { project: string; global: string | null }> = {
-    "claude-code": {
-      project: `${cwd}/.claude/skills/bluud-memory`,
-      global: `${home}/.claude/skills/bluud-memory`,
-    },
-    codex: {
-      project: `${cwd}/.codex/skills/bluud-memory`,
-      global: `${home}/.codex/skills/bluud-memory`,
-    },
-    "gemini-cli": {
-      project: `${cwd}/.agents/skills/bluud-memory`,
-      global: `${home}/.gemini/skills/bluud-memory`,
-    },
-    antigravity: {
-      project: `${cwd}/.agents/skills/bluud-memory`,
-      global: `${home}/.gemini/antigravity/skills/bluud-memory`,
-    },
-    "kimi-code-cli": {
-      project: `${cwd}/.agents/skills/bluud-memory`,
-      global: `${home}/.agents/skills/bluud-memory`,
-    },
-    cline: {
-      project: `${cwd}/.agents/skills/bluud-memory`,
-      global: `${home}/.agents/skills/bluud-memory`,
-    },
-    cursor: { project: `${cwd}/.cursor/rules/bluud-memory.mdc`, global: null },
-    windsurf: { project: `${cwd}/.windsurfrules`, global: null },
-    aider: { project: `${cwd}/AIDER.md`, global: null },
-    "github-copilot": { project: `${cwd}/.github/copilot-instructions.md`, global: null },
+function skillTargets(agent: string, cwd: string): { project: string; global: string | null } | null {
+  const project = resolveSkillTargetDir(agent, false, cwd);
+  if (!project) return null;
+  const global = resolveSkillTargetDir(agent, true, cwd);
+  return {
+    project: join(project, BLUUD_SKILL_NAME),
+    global: global ? join(global, BLUUD_SKILL_NAME) : null,
   };
-
-  return targets[agent] ?? null;
 }
 
-function skillFilesPresent(agent: string, cwd: string, home: string): boolean {
-  const entry = skillTargets(agent, cwd, home);
+function skillFilesPresent(agent: string, cwd: string): boolean {
+  const entry = skillTargets(agent, cwd);
   if (!entry) return false;
   return existsSync(entry.project) || (entry.global !== null && existsSync(entry.global));
 }
 
-async function removeSkillFiles(agent: string, cwd: string, home: string): Promise<void> {
-  const entry = skillTargets(agent, cwd, home);
+async function removeSkillFiles(agent: string, cwd: string): Promise<void> {
+  const entry = skillTargets(agent, cwd);
   if (!entry) return;
 
   const { rm } = await import("node:fs/promises");

@@ -21,22 +21,14 @@ import { detectRunningAgent } from "../lib/runningAgent.js";
 import { isSkillInstalled } from "../lib/skills.js";
 import { formatBytes } from "../lib/output.js";
 import { getFlagBoolean } from "../lib/args.js";
+import { supportedAgentNames } from "../lib/agentRegistry.js";
 import type { ProjectStatus } from "../types.js";
 
 import type { Command, CommandContext } from "./index.js";
 
-const SUPPORTED_AGENTS = [
-  "claude-code",
-  "codex",
-  "gemini-cli",
-  "antigravity",
-  "kimi-code-cli",
-  "cline",
-  "cursor",
-  "windsurf",
-  "aider",
-  "github-copilot",
-];
+// Kept in lockstep with `install.ts`/`uninstall.ts` by sourcing from the same
+// registry rather than each command hand-maintaining its own copy.
+const SUPPORTED_AGENTS = supportedAgentNames();
 
 interface AgentReport {
   agent: string;

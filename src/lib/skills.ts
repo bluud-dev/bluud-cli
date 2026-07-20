@@ -1,11 +1,15 @@
 /**
- * Integration with the `skills` CLI for skill delivery.
+ * Bluud's own native skill-delivery engine.
  *
- * `skills` is a subprocess, not a library, so Bluud shells out to `npx skills`
- * to install the bundled Bluud skill into detected AI tools.
- *
- * If `skills` is unavailable, Bluud falls back to a direct copy-to-canonical
- * install so the CLI remains functional in restricted environments.
+ * This installs the bundled Bluud skill into a detected AI tool's canonical
+ * skills directory and fans it out (symlink, falling back to a copy) into
+ * that tool's own directory. It is entirely in-process: nothing here shells
+ * out to any external installer, and there is no runtime dependency on
+ * `vercel-labs/skills` or any other separate CLI. The per-tool target
+ * directories and detection probes this module and `detect.ts` rely on live
+ * in `agentRegistry.ts`, reproduced natively from that project's design (see
+ * `agentRegistry.ts`'s header and `BLUUD_CLI_ARCHITECTURE.md`'s reconciliation
+ * section for the full history of this decision).
  */
 
 import { spawn } from "node:child_process";
@@ -14,7 +18,7 @@ import { dirname, join, relative, resolve, sep, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { claudeHome, codexHome } from "./agentHomes.js";
+import { getAgentDefinition } from "./agentRegistry.js";
 /**
  * The skill's identity. This must equal the `name` in the bundled
  * `SKILL.md` frontmatter: `skills` resolves `--skill <name>` against the
@@ -40,22 +44,25 @@ export interface SkillsInstallResult {
   agent: string;
   installed: boolean;
   /**
-   * How the skill reached the agent. `skills` means the `npx skills` installer
-   * handled it; `symlink`/`copy` are Bluud's own fallback reporting whether the
-   * canonical copy was linked into the agent's directory or duplicated into it.
+   * How the skill reached the agent: `symlink` when the canonical copy was
+   * linked into the agent's own directory, `copy` when it was duplicated
+   * there instead (either because `--copy` was requested, or a link could not
+   * be created and the install degraded to a full copy), `skipped` when the
+   * tool has no skill-delivery mechanism at all.
    */
-  mode: "skills" | "symlink" | "copy" | "skipped";
+  mode: "symlink" | "copy" | "skipped";
   message?: string;
 }
 
 /**
- * Try to install a skill via `npx skills`.  If the tool is missing or the call
- * fails, fall back to a direct copy into the agent's canonical skill dir.
+ * Install the bundled skill into `agent`'s canonical skills directory and fan
+ * it out into the agent's own directory (symlink, or a copy where a link
+ * cannot be created).
  *
- * With `dryRun: true`, this only probes whether `npx skills` would be used
- * (a read-only `commandExists` check) and reports the predicted mode without
- * spawning the installer or touching the filesystem — mirroring the
- * gortex-style `Plan`/`Apply` split the hook adapters already honor.
+ * With `dryRun: true`, this reports the route it would take — `copy` when
+ * `--copy` forces it, `symlink` otherwise — without touching the filesystem,
+ * mirroring the gortex-style `Plan`/`Apply` split the hook adapters already
+ * honor.
  */
 export async function installSkill(options: SkillsInstallOptions): Promise<SkillsInstallResult> {
   const {
@@ -69,28 +76,19 @@ export async function installSkill(options: SkillsInstallOptions): Promise<Skill
   } = options;
 
   // A tool with no skills-discovery mechanism cannot receive the skill by any
-  // route, so neither `skills` nor the local installer is worth attempting —
-  // checked before the `npx` probe so the reason reported is the tool's own,
-  // not a downstream "unknown agent" error from a subprocess that never had a
-  // chance of succeeding.
+  // route, so it is worth ruling out before anything else — the reason
+  // reported is the tool's own, not a generic "unknown agent" error.
   const unsupported = skillDeliveryUnsupportedReason(agent);
   if (unsupported) {
     return { agent, installed: false, mode: "skipped", message: unsupported };
   }
 
-  const skillsAvailable = await commandExists("npx");
-
   if (dryRun) {
-    // The link-vs-copy outcome of the local fallback cannot be known without
-    // attempting the link, so a dry run reports the mode it would *try*:
-    // `copy` when `--copy` forces it, `symlink` otherwise.
-    const predictedMode: SkillsInstallResult["mode"] = skillsAvailable
-      ? "skills"
-      : resolveSkillTargetDir(agent, global, cwd)
-        ? copy
-          ? "copy"
-          : "symlink"
-        : "skipped";
+    const predictedMode: SkillsInstallResult["mode"] = resolveSkillTargetDir(agent, global, cwd)
+      ? copy
+        ? "copy"
+        : "symlink"
+      : "skipped";
     return {
       agent,
       installed: false,
@@ -99,46 +97,7 @@ export async function installSkill(options: SkillsInstallOptions): Promise<Skill
     };
   }
 
-  if (skillsAvailable) {
-    try {
-      await runSkillsAdd({ skillPath, agent, global, copy });
-      return { agent, installed: true, mode: "skills" };
-    } catch (err) {
-      // Fall through to manual copy with a warning recorded in the message.
-      const message = err instanceof Error ? err.message : String(err);
-      if (!copy) {
-        // Try the local installer once before giving up.
-        return manualCopyInstall({ skillName, skillPath, agent, global, cwd, message });
-      }
-      // The caller already asked `skills` for a plain copy and it failed, so
-      // repeating the same operation locally has nothing new to try.
-      return { agent, installed: false, mode: "skipped", message };
-    }
-  }
-
   return manualCopyInstall({ skillName, skillPath, agent, global, cwd, forceCopy: copy });
-}
-
-async function runSkillsAdd(options: {
-  skillPath: string;
-  agent: string;
-  global: boolean;
-  copy: boolean;
-}): Promise<void> {
-  const args = [
-    "skills",
-    "add",
-    options.skillPath,
-    "--skill",
-    BLUUD_SKILL_NAME,
-    "-a",
-    options.agent,
-    "-y",
-  ];
-  if (options.global) args.push("-g");
-  if (options.copy) args.push("--copy");
-
-  await execFile("npx", args);
 }
 
 /**
@@ -153,8 +112,8 @@ export function canonicalSkillsDir(global: boolean, cwd: string): string {
 }
 
 /**
- * Install the skill without `npx skills`: write it once to the canonical
- * directory, then link each agent's directory at that copy.
+ * Install the skill natively: write it once to the canonical directory, then
+ * link the agent's own directory at that copy.
  *
  * `forceCopy` (the `--copy` flag) skips the canonical indirection entirely and
  * duplicates the files straight into the agent's directory — the documented
@@ -168,7 +127,6 @@ async function manualCopyInstall(options: {
   global: boolean;
   cwd: string;
   forceCopy?: boolean;
-  message?: string;
 }): Promise<SkillsInstallResult> {
   const targetDir = resolveSkillTargetDir(options.agent, options.global, options.cwd);
   if (!targetDir) {
@@ -177,8 +135,7 @@ async function manualCopyInstall(options: {
       agent: options.agent,
       installed: false,
       mode: "skipped",
-      message:
-        unsupported ?? options.message ?? `No manual install target known for ${options.agent}`,
+      message: unsupported ?? `No install target known for ${options.agent}`,
     };
   }
 
@@ -189,12 +146,7 @@ async function manualCopyInstall(options: {
       await rm(agentSkillDir, { recursive: true, force: true });
       await mkdir(targetDir, { recursive: true });
       await cp(options.skillPath, agentSkillDir, { recursive: true });
-      return {
-        agent: options.agent,
-        installed: true,
-        mode: "copy",
-        message: options.message ? `${options.message} (copy fallback succeeded)` : undefined,
-      };
+      return { agent: options.agent, installed: true, mode: "copy" };
     }
 
     const canonicalDir = join(canonicalSkillsDir(options.global, options.cwd), options.skillName);
@@ -205,20 +157,16 @@ async function manualCopyInstall(options: {
     await mkdir(dirname(canonicalDir), { recursive: true });
     await cp(options.skillPath, canonicalDir, { recursive: true });
 
-    // Several tools (Cline, Kimi, Gemini CLI at project scope) already read
-    // from `.agents/skills` — for those the canonical copy *is* the agent's
-    // copy and linking it to itself would be a no-op at best.
+    // Several tools (Cline, Kimi, Gemini CLI at project scope, and every other
+    // "universal" agent) already read from `.agents/skills` — for those the
+    // canonical copy *is* the agent's copy and linking it to itself would be
+    // a no-op at best.
     const mode: LinkMode =
       resolve(agentSkillDir) === resolve(canonicalDir)
         ? "symlink"
         : await linkOrCopy(canonicalDir, agentSkillDir);
 
-    return {
-      agent: options.agent,
-      installed: true,
-      mode,
-      message: options.message ? `${options.message} (local install succeeded)` : undefined,
-    };
+    return { agent: options.agent, installed: true, mode };
   } catch (err) {
     return {
       agent: options.agent,
@@ -227,33 +175,6 @@ async function manualCopyInstall(options: {
       message: err instanceof Error ? err.message : String(err),
     };
   }
-}
-
-/**
- * Resolve the canonical skill target directory for a known agent.
- *
- * This mirrors the subset of the `skills` agent registry that Bluud needs when
- * `skills` itself is unavailable, and every entry is verified against that
- * registry (`skills/src/agents.ts`), which is the authority named by
- * `BLUUD_CLI_ARCHITECTURE.md` section 2.1.
- *
- * **Every target is a directory that holds skill sub-directories** — the
- * install writes `<target>/<skill-name>/SKILL.md`. That invariant is the whole
- * contract of this function. An earlier version listed each tool's *instruction
- * file* instead (`AIDER.md`, `.windsurfrules`, `.github/copilot-instructions.md`,
- * `.cursor/rules`), conflating "where does this tool read prose guidance" with
- * "where does this tool discover skills". Those are different mechanisms, and
- * the mismatch produced nonsense paths like `AIDER.md/bluud-memory/SKILL.md` —
- * a *directory* named `AIDER.md`, which shadows the very file the tool reads.
- *
- * A tool with no skills-discovery mechanism at all therefore does not belong
- * here; see `SKILL_DELIVERY_UNSUPPORTED`.
- */
-interface SkillTarget {
-  /** Project-relative directory holding skill sub-directories. */
-  project: string;
-  /** Absolute user-level equivalent, or null when the tool has no global surface. */
-  global: string | null;
 }
 
 /**
@@ -268,37 +189,11 @@ const SKILL_DELIVERY_UNSUPPORTED: Record<string, string> = {
   // no skills directory and loads no instruction file automatically — a
   // conventions file reaches it only through an explicit `--read CONVENTIONS.md`
   // or a `read:` entry in `.aider.conf.yml`. It is correspondingly absent from
-  // the `skills` registry's 73 agents (only the separate `aider-desk` appears).
+  // `agentRegistry.ts`'s registry (only the separate `aider-desk` appears there).
   aider:
     "aider has no skills directory; add the Bluud skill manually with " +
     "`aider --read <path>/SKILL.md` or a `read:` entry in .aider.conf.yml",
 };
-
-function skillRegistry(): Record<string, SkillTarget> {
-  const home = os.homedir();
-  return {
-    // Honors CLAUDE_CONFIG_DIR / CODEX_HOME exactly as the tools and the
-    // `skills` registry do; a user who relocated their config must not have the
-    // skill written to the stock path where the tool will never look.
-    "claude-code": { project: ".claude/skills", global: join(claudeHome(), "skills") },
-    codex: { project: ".agents/skills", global: join(codexHome(), "skills") },
-    "gemini-cli": { project: ".agents/skills", global: join(home, ".gemini", "skills") },
-    antigravity: {
-      project: ".agents/skills",
-      global: join(home, ".gemini", "antigravity", "skills"),
-    },
-    "kimi-code-cli": { project: ".agents/skills", global: join(home, ".agents", "skills") },
-    cline: { project: ".agents/skills", global: join(home, ".agents", "skills") },
-    cursor: { project: ".agents/skills", global: join(home, ".cursor", "skills") },
-    // `.windsurfrules` is the legacy single-file rules surface, superseded by
-    // `.windsurf/`; skills live under `.windsurf/skills`, not in the rules file.
-    windsurf: {
-      project: ".windsurf/skills",
-      global: join(home, ".codeium", "windsurf", "skills"),
-    },
-    "github-copilot": { project: ".agents/skills", global: join(home, ".copilot", "skills") },
-  };
-}
 
 /**
  * Why `agent` cannot receive a skill by file delivery, or null when it can.
@@ -308,23 +203,39 @@ export function skillDeliveryUnsupportedReason(agent: string): string | null {
   return SKILL_DELIVERY_UNSUPPORTED[agent] ?? null;
 }
 
+/**
+ * Resolve the canonical skill target directory for a known agent, from the
+ * native registry in `agentRegistry.ts`.
+ *
+ * **Every target is a directory that holds skill sub-directories** — the
+ * install writes `<target>/<skill-name>/SKILL.md`. That invariant is the whole
+ * contract of this function. An earlier version of this codebase listed some
+ * tools' *instruction file* instead (`AIDER.md`, `.windsurfrules`,
+ * `.github/copilot-instructions.md`, `.cursor/rules`), conflating "where does
+ * this tool read prose guidance" with "where does this tool discover skills".
+ * Those are different mechanisms, and the mismatch produced nonsense paths
+ * like `AIDER.md/bluud-memory/SKILL.md` — a *directory* named `AIDER.md`,
+ * which shadows the very file the tool reads.
+ *
+ * A tool with no skills-discovery mechanism at all therefore does not belong
+ * in the registry; see `SKILL_DELIVERY_UNSUPPORTED`.
+ */
 export function resolveSkillTargetDir(agent: string, global: boolean, cwd: string): string | null {
-  const entry = skillRegistry()[agent];
-  if (!entry) return null;
+  const definition = getAgentDefinition(agent);
+  if (!definition) return null;
 
   if (global) {
-    return entry.global;
+    return definition.globalSkillsDir ? definition.globalSkillsDir() : null;
   }
-  return resolve(cwd, entry.project);
+  return resolve(cwd, definition.projectSkillsDir);
 }
 
 /**
  * Whether the Bluud skill appears installed for `agent` at its known target
  * directory (the same location `installSkill`/`manualCopyInstall` write to).
  * Read-only — used by `bluud doctor` to report per-tool skill-delivery drift
- * without writing anything. Agents with no known manual target (only reached
- * via `npx skills`'s own ~75-tool registry) resolve to `false` rather than
- * throwing, since Bluud has no visibility into that tool's directory layout.
+ * without writing anything. An agent absent from the registry resolves to
+ * `false` rather than throwing.
  */
 export function isSkillInstalled(agent: string, global: boolean, cwd: string): boolean {
   const targetDir = resolveSkillTargetDir(agent, global, cwd);
@@ -332,6 +243,11 @@ export function isSkillInstalled(agent: string, global: boolean, cwd: string): b
   return existsSync(join(targetDir, BLUUD_SKILL_NAME));
 }
 
+/**
+ * Whether `command` is resolvable on `PATH`. A generic utility — used by
+ * `agentRegistry.ts` to detect PATH-only tools like `aider` (a pip-installed
+ * CLI with no persistent config directory to probe instead).
+ */
 export async function commandExists(command: string): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(process.platform === "win32" ? "where" : "which", [command], {
@@ -339,28 +255,6 @@ export async function commandExists(command: string): Promise<boolean> {
     });
     child.on("error", () => resolve(false));
     child.on("exit", (code) => resolve(code === 0));
-  });
-}
-
-function execFile(command: string, args: string[]): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "pipe" });
-    let stdout = "";
-    let stderr = "";
-    child.stdout?.on("data", (chunk: Buffer) => {
-      stdout += chunk.toString("utf8");
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
-    });
-    child.on("error", (err) => reject(err));
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(stderr.trim() || stdout.trim() || `Command exited with code ${code}`));
-      }
-    });
   });
 }
 

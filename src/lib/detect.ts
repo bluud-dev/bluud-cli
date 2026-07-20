@@ -1,44 +1,16 @@
 /**
  * Detection of AI coding tools installed on this machine.
  *
- * Mirrors the well-known-directory probing pattern from `vercel-labs/skills`
- * (`skills/src/agents.ts`): each tool is considered "installed" if its
- * conventional config/home directory exists, respecting the same environment
- * variable overrides the tool itself honors (`CLAUDE_CONFIG_DIR`,
- * `CODEX_HOME`, …). This never touches disk beyond `existsSync` — it is a
- * pure read, safe to call before authentication or any write.
- *
- * `aider` has no persistent home directory (it is a pip-installed CLI), so it
- * is detected via `PATH` lookup instead, matching `commandExists` in
- * `skills.ts`.
+ * The actual per-tool probes (well-known config directories, PATH lookups,
+ * and the handful of bespoke heuristics some tools need) live in
+ * `agentRegistry.ts`, the single native registry this module, `skills.ts`,
+ * and every command share — this file is only the small, stable batch API
+ * the commands import; it never touches disk itself.
  */
 
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import os from "node:os";
-import { commandExists } from "./skills.js";
-// Shared with the skill-target registry so detection and installation can
-// never disagree about where a relocated config lives — see `agentHomes.ts`.
-import { claudeHome, codexHome } from "./agentHomes.js";
+import { detectAgent as detectRegistryAgent } from "./agentRegistry.js";
 
 export type AgentDetection = Record<string, boolean>;
-
-const DIRECTORY_PROBES: Record<string, () => string[]> = {
-  "claude-code": () => [claudeHome()],
-  codex: () => [codexHome(), "/etc/codex"],
-  "gemini-cli": () => [join(os.homedir(), ".gemini")],
-  antigravity: () => [join(os.homedir(), ".gemini", "antigravity")],
-  "kimi-code-cli": () => [join(os.homedir(), ".kimi-code"), join(os.homedir(), ".kimi")],
-  cline: () => [join(os.homedir(), ".cline")],
-  cursor: () => [join(os.homedir(), ".cursor")],
-  windsurf: () => [join(os.homedir(), ".codeium", "windsurf")],
-  "github-copilot": () => [join(os.homedir(), ".copilot")],
-};
-
-/** Agents detected by PATH lookup rather than a config directory. */
-const COMMAND_PROBES: Record<string, string> = {
-  aider: "aider",
-};
 
 /**
  * Detect whether a single agent appears installed on this machine.
@@ -46,15 +18,7 @@ const COMMAND_PROBES: Record<string, string> = {
  * probe speculatively.
  */
 export async function detectAgent(agent: string): Promise<boolean> {
-  const dirs = DIRECTORY_PROBES[agent];
-  if (dirs) {
-    return dirs().some((dir) => existsSync(dir));
-  }
-  const command = COMMAND_PROBES[agent];
-  if (command) {
-    return commandExists(command);
-  }
-  return false;
+  return detectRegistryAgent(agent);
 }
 
 /** Detect every agent in `agents`, returning a name → detected map. */

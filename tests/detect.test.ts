@@ -80,4 +80,25 @@ describe("detect", () => {
       windsurf: false,
     });
   });
+
+  // The bulk of the ~73-tool registry expansion is exactly this same
+  // directory-probe shape, wired through `agentRegistry.ts` instead of
+  // `detect.ts`'s own former DIRECTORY_PROBES map. A couple of examples from
+  // that expanded set, distinct from the original 10, prove the wiring
+  // actually reaches them rather than only the tools `detect.ts` always knew
+  // about.
+  it("detects opencode via its XDG config-home directory", async () => {
+    mockedExistsSync.mockImplementation(
+      (p) => p === join(os.homedir(), ".config", "opencode"),
+    );
+    expect(await detectAgent("opencode")).toBe(true);
+  });
+
+  it("distinguishes antigravity-cli from antigravity (separate probe directories)", async () => {
+    mockedExistsSync.mockImplementation(
+      (p) => p === join(home, ".gemini", "antigravity-cli"),
+    );
+    expect(await detectAgent("antigravity-cli")).toBe(true);
+    expect(await detectAgent("antigravity")).toBe(false);
+  });
 });

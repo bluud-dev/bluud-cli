@@ -97,14 +97,21 @@ describe("uninstallCommand", () => {
       bluudBinary: process.argv[1] ?? "bluud",
     };
     await codexAdapter.apply(env, { dryRun: false, force: false });
-    await mkdir(join(cwd, ".codex", "skills", "bluud-memory"), { recursive: true });
+    // Codex's real skill target is `.agents/skills` (the universal directory
+    // codex shares with several other tools), not `.codex/skills` — this used
+    // to be `.codex/skills` here, matching the uninstall command's own map
+    // before it was fixed to resolve through the same registry `install`
+    // uses; that map was simply wrong for codex (and cursor/windsurf/aider/
+    // github-copilot), which is exactly the bug consolidating onto one
+    // registry closes.
+    await mkdir(join(cwd, ".agents", "skills", "bluud-memory"), { recursive: true });
 
     const ctx = makeContext({ flags: { agent: ["codex"], "dry-run": true } });
     const code = await uninstallCommand.run(ctx);
 
     expect(code).toBe(0);
     // Nothing was actually removed.
-    expect(existsSync(join(cwd, ".codex", "skills", "bluud-memory"))).toBe(true);
+    expect(existsSync(join(cwd, ".agents", "skills", "bluud-memory"))).toBe(true);
     const configToml = await readFile(join(cwd, ".codex", "config.toml"), "utf8");
     expect(configToml).toContain("bluud:session-start:start");
     expect(configToml).toContain("[[hooks.SessionStart]]");

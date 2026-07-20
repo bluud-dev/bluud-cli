@@ -12,8 +12,8 @@
  *      `loginWithToken` (the exact function `install.ts` calls).
  *   3. Compute project identity for a throwaway directory and register it.
  *   4. Install the bundled skill into a fake Claude Code project via the exact
- *      call `install.ts` makes — whichever path is real on this machine, the
- *      separate `skills` package or Bluud's own manual-copy fallback.
+ *      call `install.ts` makes — Bluud's own native canonical-copy-plus-
+ *      symlink installer, entirely in-process.
  *   5. Apply the claude-code hook adapter and assert the SessionStart hook and
  *      materialized pull script exist.
  *   6. Push a memory node and pull it back, proving the full round trip
@@ -175,9 +175,7 @@ describe("live onboarding against a real backend (dev-test account)", () => {
       expect(reRegistration.project_id).toBe(identity.projectId);
 
       // Skill install: exactly the call `install.ts` makes (no forced
-      // `copy`), so this exercises whichever path is real for this machine —
-      // through the separate `skills` package if it is reachable, or Bluud's
-      // own manual-copy fallback if it is not.
+      // `copy`), exercising Bluud's own native installer end to end.
       const skillResult = await installSkill({
         skillName: BLUUD_SKILL_NAME,
         skillPath: bundledSkillPath(),
@@ -185,10 +183,10 @@ describe("live onboarding against a real backend (dev-test account)", () => {
         cwd: projectDir,
       });
       expect(skillResult.installed).toBe(true);
-      // `symlink` is the local fallback's normal outcome since Phase 15 (the
-      // canonical `.agents/skills` copy is linked into the agent's dir);
-      // `copy` is its degraded form on a filesystem that refuses links.
-      expect(["skills", "symlink", "copy"]).toContain(skillResult.mode);
+      // `symlink` is the installer's normal outcome (the canonical
+      // `.agents/skills` copy is linked into the agent's dir); `copy` is its
+      // degraded form on a filesystem that refuses links.
+      expect(["symlink", "copy"]).toContain(skillResult.mode);
       const installedSkillFile = join(
         projectDir,
         ".claude",

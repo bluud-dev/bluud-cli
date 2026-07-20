@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { doctorCommand } from "../src/commands/doctor.js";
 import { ApiClient } from "../src/lib/api.js";
+import { supportedAgentNames } from "../src/lib/agentRegistry.js";
 import type { CommandContext } from "../src/commands/index.js";
 import type { ProjectIdentity } from "../src/types.js";
 
@@ -74,18 +75,9 @@ const identity: ProjectIdentity = {
   path: "/tmp/project",
 };
 
-const ALL_AGENTS = [
-  "claude-code",
-  "codex",
-  "gemini-cli",
-  "antigravity",
-  "kimi-code-cli",
-  "cline",
-  "cursor",
-  "windsurf",
-  "aider",
-  "github-copilot",
-];
+// Sourced from the same registry `doctor.ts` itself now uses, so this fixture
+// can never silently drift out of sync with the full supported-tools set.
+const ALL_AGENTS = supportedAgentNames();
 
 describe("doctorCommand", () => {
   beforeEach(() => {

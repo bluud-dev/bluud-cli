@@ -82,9 +82,13 @@ export const antigravityAdapter: Adapter = {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
     }
 
-    await applyGeminiSessionStartHook(getSettingsPath(env), scriptPath, "bluud-memory-pull");
+    const wrote = await applyGeminiSessionStartHook(
+      getSettingsPath(env),
+      scriptPath,
+      "bluud-memory-pull",
+    );
 
-    return { name: ADAPTER_NAME, applied: true, actions: plan.actions };
+    return { name: ADAPTER_NAME, applied: wrote, actions: plan.actions };
   },
 };
 

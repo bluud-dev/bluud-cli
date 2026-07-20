@@ -15,6 +15,7 @@ import { loadAuth, saveAuth } from "./lib/config.js";
 import { CliError, guidanceForCode, type ErrorCode } from "./lib/error.js";
 import { createLogger, resolveLogLevel } from "./lib/logger.js";
 import { defaultOutput, formatError } from "./lib/output.js";
+import { detectRunningAgent } from "./lib/runningAgent.js";
 import type { CommandContext } from "./commands/index.js";
 import { loginCommand } from "./commands/login.js";
 import { logoutCommand } from "./commands/logout.js";
@@ -46,12 +47,6 @@ const commands = [
 
 async function main(): Promise<number> {
   const { command, positionals, flags } = parseArgs(process.argv.slice(2));
-  const nonInteractive = Boolean(
-    process.env.BLUUD_NON_INTERACTIVE ||
-    process.env.CI ||
-    getFlagBoolean(flags, "yes") ||
-    getFlagBoolean(flags, "y"),
-  );
 
   if (getFlagBoolean(flags, "version") || getFlagBoolean(flags, "v")) {
     process.stdout.write(`${await getVersion()}\n`);
@@ -71,6 +66,22 @@ async function main(): Promise<number> {
       env: process.env.BLUUD_LOG,
     }),
   });
+
+  // An agent driving the CLI has no TTY to answer a prompt with, so treat it
+  // exactly like `--yes`: every interactive step falls through to its default
+  // instead of blocking the agent's session (BLUUD_CLI_ARCHITECTURE.md §5.3).
+  const runningAgent = await detectRunningAgent();
+  if (runningAgent.isAgent) {
+    log.debug(`Running inside ${runningAgent.name}; interactive prompts suppressed.`);
+  }
+
+  const nonInteractive = Boolean(
+    process.env.BLUUD_NON_INTERACTIVE ||
+    process.env.CI ||
+    getFlagBoolean(flags, "yes") ||
+    getFlagBoolean(flags, "y") ||
+    runningAgent.isAgent,
+  );
 
   // Persist a silently-refreshed session so the rotated pair survives the
   // process. A PAT session never refreshes (empty refresh token), so this only

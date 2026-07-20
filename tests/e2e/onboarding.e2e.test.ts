@@ -25,12 +25,26 @@
  * console.warn, not silently — when the backend cannot be reached, so CI
  * environments without one still get a clean run rather than a false failure.
  *
- * Known side effect: each run registers a new project owned by the dev/test
- * account (there is no user-facing project-deletion endpoint to undo this
- * with — see BLUUD_ARCHITECTURE §admin — only admin hard-delete). This is the
- * same footprint a real user's first `bluud` run would leave and is
- * consistent with CLAUDE.md's treatment of the dev/test account as
- * reusable infrastructure, not scratch state to scrub after every session.
+ * Repeatability: this suite must be runnable an unbounded number of times.
+ * There is no user-facing project-deletion endpoint (only admin hard-delete —
+ * see BLUUD_ARCHITECTURE §admin), and the dev/test account is free tier, so a
+ * run that registered a *fresh* project each time would silently consume the
+ * 5-project free-tier allowance and then fail forever with
+ * `project_limit_exceeded`. That is exactly what happened before this suite
+ * was made idempotent.
+ *
+ * Two properties keep it repeatable, and both matter:
+ *
+ *   1. **A stable project directory.** Project identity is `sha256(absolute
+ *      path)[:32]` for a non-git directory (concept §6.1), so a fixed path
+ *      yields a fixed project id and re-registration is the idempotent
+ *      "confirm existing membership" path rather than a new row. Identity
+ *      depends only on the path, never on the contents, so the directory's
+ *      contents are wiped each run to keep install assertions deterministic
+ *      while the identity stays put.
+ *   2. **The memory node is deleted again.** The push/pull round trip asserts
+ *      against the node it created by id and removes it afterwards, so the
+ *      tree does not grow run over run.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, mkdir, rm, readFile } from "node:fs/promises";
@@ -138,17 +152,27 @@ describe("live onboarding against a real backend (dev-test account)", () => {
     const api = new ApiClient({ baseUrl: BASE_URL });
     await loginWithToken(api, pat as string);
 
-    // A throwaway, non-git directory: path_hash identity, matching a fresh
-    // project with no git remote yet.
-    const projectDir = await mkdtemp(join(tmpdir(), "bluud-e2e-project-"));
+    // A stable, non-git directory: path_hash identity that is identical on
+    // every run of this suite on this machine (see the header note on
+    // repeatability). Wiped and recreated so contents are deterministic.
+    const projectDir = join(tmpdir(), "bluud-cli-e2e-onboarding-fixture");
+    await rm(projectDir, { recursive: true, force: true });
+    await mkdir(projectDir, { recursive: true });
     try {
       const identity = await requireIdentity(projectDir);
       expect(identity.identitySource).toBe("path_hash");
 
       const registration = await api.registerProject(identity, "bluud-cli-e2e-onboarding");
-      expect(registration.is_new).toBe(true);
       expect(registration.project_id).toBe(identity.projectId);
       expect(registration.token.length).toBeGreaterThan(0);
+
+      // Whether this run created the row depends on whether a previous run
+      // already did, so `is_new` is not asserted directly. Re-registering is,
+      // and it must take the idempotent confirm path: same project, same
+      // token, no second row (and therefore no quota consumption).
+      const reRegistration = await api.registerProject(identity, "bluud-cli-e2e-onboarding");
+      expect(reRegistration.is_new).toBe(false);
+      expect(reRegistration.project_id).toBe(identity.projectId);
 
       // Skill install: exactly the call `install.ts` makes (no forced
       // `copy`), so this exercises whichever path is real for this machine —
@@ -161,7 +185,10 @@ describe("live onboarding against a real backend (dev-test account)", () => {
         cwd: projectDir,
       });
       expect(skillResult.installed).toBe(true);
-      expect(["skills", "copy"]).toContain(skillResult.mode);
+      // `symlink` is the local fallback's normal outcome since Phase 15 (the
+      // canonical `.agents/skills` copy is linked into the agent's dir);
+      // `copy` is its degraded form on a filesystem that refuses links.
+      expect(["skills", "symlink", "copy"]).toContain(skillResult.mode);
       const installedSkillFile = join(
         projectDir,
         ".claude",
@@ -212,10 +239,23 @@ describe("live onboarding against a real backend (dev-test account)", () => {
       expect(pushResult.nodes).toHaveLength(1);
       expect(pushResult.nodes[0]?.title).toBe("E2E Onboarding Node");
 
-      const pulled = await api.pullMemory(identity.projectId, projectToken);
-      expect(pulled.nodes).toHaveLength(1);
-      expect(pulled.nodes[0]?.id).toBe(pushResult.nodes[0]?.id);
-      expect(pulled.nodes[0]?.body).toBe(bodyLine);
+      const createdId = pushResult.nodes[0]?.id as string;
+      try {
+        // Locate the pushed node by id rather than asserting on tree size: the
+        // project is reused across runs, so the tree is not guaranteed empty.
+        const pulled = await api.pullMemory(identity.projectId, projectToken);
+        const found = pulled.nodes.find((n) => n.id === createdId);
+        expect(found).toBeDefined();
+        expect(found?.body).toBe(bodyLine);
+        expect(found?.title).toBe("E2E Onboarding Node");
+      } finally {
+        // Remove the node so the reused project's tree does not grow run over
+        // run — the memory-side counterpart of reusing the project row.
+        await api.pushMemory(identity.projectId, projectToken, [{ op: "delete", id: createdId }]);
+      }
+
+      const afterDelete = await api.pullMemory(identity.projectId, projectToken);
+      expect(afterDelete.nodes.find((n) => n.id === createdId)).toBeUndefined();
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }

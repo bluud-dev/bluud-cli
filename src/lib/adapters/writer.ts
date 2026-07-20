@@ -7,10 +7,11 @@
  *   - JSON/JSONC merge preserving unrelated user keys
  */
 
-import { readFile, writeFile, rename, mkdir, rm } from "node:fs/promises";
+import { readFile, writeFile, rename, mkdir, rm, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 
 export interface MarkerBlock {
   startMarker: string;
@@ -18,15 +19,129 @@ export interface MarkerBlock {
   content: string;
 }
 
+/**
+ * Distinctive infix in every temp file `atomicWriteFile` creates.
+ *
+ * A crash between the write and the rename strands the temp on disk, and the
+ * success path only ever consumes *this* write's temp. Sharing one constant
+ * between the writer and the sweeper keeps `cleanStaleTempFiles` from ever
+ * drifting out of sync with the names it is meant to match.
+ */
+const TEMP_INFIX = ".bluud.tmp-";
+
+/**
+ * How long an orphaned temp must sit untouched before a later write reaps it.
+ * It only has to exceed the lifetime of one in-flight `atomicWriteFile` — a
+ * small write plus `renameWithRetry`'s ~275 ms worst case — so an hour is
+ * orders of magnitude of headroom and guarantees a temp another writer is
+ * still filling is never mistaken for debris.
+ */
+const STALE_TEMP_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Errors that mean "the destination is momentarily locked", not "this write is
+ * impossible".
+ *
+ * On Windows `rename` maps to `MoveFileEx(MOVEFILE_REPLACE_EXISTING)`, which
+ * fails with `ERROR_SHARING_VIOLATION` / `ERROR_ACCESS_DENIED` while another
+ * process holds the destination open without `FILE_SHARE_DELETE`. For the
+ * files Bluud writes that is a routine event, not a rare one: `settings.json`
+ * and `CLAUDE.md` inside a tool's own config directory are exactly what that
+ * tool, its language server, an antivirus scanner, or a search indexer keeps
+ * open. Those holders release within milliseconds.
+ *
+ * On POSIX `rename` over an open file is legal, so none of these codes occur
+ * for this reason and the retry loop collapses to a single attempt with no
+ * added latency.
+ */
+const RETRYABLE_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+function isRetryableRenameError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "code" in err &&
+    typeof (err as { code: unknown }).code === "string" &&
+    RETRYABLE_RENAME_CODES.has((err as { code: string }).code)
+  );
+}
+
+/**
+ * Rename with a short bounded backoff on transient Windows sharing violations,
+ * mirroring gortex's `renameWithRetry` (`internal/agents/writer.go`). A
+ * non-retryable error is rethrown on the first attempt so a genuine
+ * permissions failure still surfaces immediately.
+ */
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  const attempts = 10;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      await rename(from, to);
+      return;
+    } catch (err) {
+      if (!isRetryableRenameError(err) || attempt === attempts - 1) {
+        throw err;
+      }
+      await delay((attempt + 1) * 5);
+    }
+  }
+}
+
+/**
+ * Best-effort removal of temp files an earlier write orphaned in `dir`.
+ *
+ * Only files carrying Bluud's own infix *and* untouched for longer than
+ * `STALE_TEMP_AGE_MS` are removed. Every error is swallowed: this is directory
+ * hygiene, not a load-bearing step — a write must never fail because a
+ * leftover could not be reaped.
+ */
+async function cleanStaleTempFiles(dir: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+
+  const cutoff = Date.now() - STALE_TEMP_AGE_MS;
+  await Promise.all(
+    entries
+      .filter((name) => name.includes(TEMP_INFIX))
+      .map(async (name) => {
+        const path = join(dir, name);
+        try {
+          const info = await stat(path);
+          if (info.mtimeMs < cutoff) {
+            await rm(path, { force: true });
+          }
+        } catch {
+          // Vanished or unreadable — nothing to sweep from here.
+        }
+      }),
+  );
+}
+
+/**
+ * Write `content` to `filePath` atomically: a temp file in the same directory
+ * followed by a rename, so a concurrent reader sees either the old file or the
+ * fully-written new one, never a half-written state. Writing the temp beside
+ * the destination (rather than in the system temp dir) keeps the rename on one
+ * filesystem, where it is atomic — a cross-device rename would fall back to a
+ * copy and lose that guarantee.
+ */
 export async function atomicWriteFile(filePath: string, content: string): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true });
-  const tempPath = `${filePath}.tmp-${randomBytes(4).toString("hex")}`;
+  const dir = dirname(filePath);
+  await mkdir(dir, { recursive: true });
+  await cleanStaleTempFiles(dir);
+
+  const tempPath = `${filePath}${TEMP_INFIX}${randomBytes(4).toString("hex")}`;
   await writeFile(tempPath, content, { mode: 0o644 });
   try {
-    await rename(tempPath, filePath);
-  } catch {
+    await renameWithRetry(tempPath, filePath);
+  } catch (err) {
     await rm(tempPath, { force: true });
-    throw new Error(`Failed to write ${filePath}`);
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to write ${filePath}: ${reason}`);
   }
 }
 

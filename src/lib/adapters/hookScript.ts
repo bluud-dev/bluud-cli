@@ -263,15 +263,61 @@ export async function removeHookScript(path: string): Promise<boolean> {
 }
 
 /**
+ * Characters that a hook path cannot contain, because the command string is
+ * embedded in a tool's config and executed through a shell.
+ *
+ * Each is a *silent* corruption rather than a loud error, which is why they are
+ * refused up front instead of escaped:
+ *
+ *   - `"` terminates the quoting this function adds, so the remainder of the
+ *     path becomes separate shell words.
+ *   - `$` and a backtick are expanded inside double quotes by Git Bash (and
+ *     every POSIX shell): `C:/Users/$env/…` resolves to `C:/Users//…`. Single
+ *     quotes would suppress that, but cmd.exe does not treat single quotes as
+ *     quoting at all, and the same command string has to survive both shells.
+ *   - A newline splits the stored command into two commands.
+ *
+ * A refused path is reported to the caller, which skips wiring that tool rather
+ * than writing a hook that fails at session start with a message pointing at a
+ * path the user never typed.
+ */
+const UNSAFE_COMMAND_CHARS = /["`$\r\n]/;
+
+/**
  * The command a tool's config should store to invoke `path`.
  *
  * Backslashes are replaced unconditionally, following gortex's
  * `shellSafeHookBinary`: hooks are executed through a shell, and on Windows
  * that shell is often Git Bash, where a backslash is an escape character that
  * silently mangles `C:\Users\me\…` into `C:Usersme…`. Forward slashes survive
- * both cmd.exe and Git Bash. The path is quoted so a directory containing a
- * space still resolves.
+ * both cmd.exe and Git Bash — Git Bash maps `C:/Users/...` back to a native
+ * path when it spawns the script. The path is quoted so a directory containing
+ * a space still resolves under both shells.
+ *
+ * Throws when the path contains a character that quoting cannot make safe.
  */
 export function hookScriptCommand(path: string): string {
-  return `"${path.replace(/\\/g, "/")}"`;
+  const normalized = path.replace(/\\/g, "/");
+  if (UNSAFE_COMMAND_CHARS.test(normalized)) {
+    throw new Error(
+      `Refusing to write a hook command: the path ${path} contains a character ` +
+        'that cannot be safely quoted for a shell (one of " ` $ or a line break).',
+    );
+  }
+  return `"${normalized}"`;
+}
+
+/**
+ * `hookScriptCommand` that reports failure as `null` instead of throwing.
+ *
+ * The plan/detect side of an adapter must stay total: `bluud doctor` runs over
+ * every tool and reports drift, so one tool whose path is unquotable has to
+ * degrade to "nothing to change here" rather than abort the whole readout.
+ */
+export function hookScriptCommandOrNull(path: string): string | null {
+  try {
+    return hookScriptCommand(path);
+  } catch {
+    return null;
+  }
 }

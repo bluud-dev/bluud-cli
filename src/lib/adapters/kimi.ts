@@ -49,7 +49,7 @@ import {
 import {
   BLUUD_DIR_NAME,
   applyHookScript,
-  hookScriptCommand,
+  hookScriptCommandOrNull,
   hookScriptFileName,
   planHookScript,
   removeHookScript,
@@ -72,7 +72,10 @@ export const kimiAdapter: Adapter = {
     const configPath = getConfigPath(env);
     const script = await planHookScript(env, hookScriptSpec(env));
     const command = buildHookCommand(script.path);
-    const wouldChange = detected && !(await tomlFileContains(configPath, command));
+    // A path with no writable command has nothing pending — never report a
+    // change `apply` would refuse to make.
+    const wouldChange =
+      detected && command !== null && !(await tomlFileContains(configPath, command));
 
     return {
       name: ADAPTER_NAME,
@@ -113,6 +116,9 @@ export const kimiAdapter: Adapter = {
 
     const configPath = getConfigPath(env);
     const command = buildHookCommand(scriptPath);
+    if (command === null) {
+      return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
+    }
     const alreadyPresent = await tomlFileContains(configPath, command);
 
     if (!alreadyPresent) {
@@ -147,8 +153,13 @@ function getScriptPath(env: AdapterEnv): string {
   );
 }
 
-function buildHookCommand(scriptPath: string): string {
-  return hookScriptCommand(scriptPath);
+/**
+ * Null when the script path cannot be safely embedded in a shell command; the
+ * caller then leaves this tool unconfigured rather than writing a hook that
+ * would fail at session start.
+ */
+function buildHookCommand(scriptPath: string): string | null {
+  return hookScriptCommandOrNull(scriptPath);
 }
 
 export async function uninstallKimi(env: AdapterEnv): Promise<boolean> {

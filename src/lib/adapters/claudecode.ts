@@ -30,7 +30,7 @@ import {
 import {
   BLUUD_DIR_NAME,
   applyHookScript,
-  hookScriptCommand,
+  hookScriptCommandOrNull,
   hookScriptFileName,
   planHookScript,
   removeHookScript,
@@ -117,12 +117,16 @@ export const claudeCodeAdapter: Adapter = {
       return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
     }
 
+    const command = buildHookCommand(scriptPath);
+    if (command === null) {
+      return { name: ADAPTER_NAME, applied: false, actions: plan.actions };
+    }
+
     // Write the SessionStart hook via JSON merge so unrelated settings are preserved.
     await mergeJsonFile<ClaudeSettings>(settingsPath, (current) => {
       const next = { ...current };
       next.hooks = { ...next.hooks };
       const existingEntries = next.hooks.SessionStart ?? [];
-      const command = buildHookCommand(scriptPath);
       const alreadyPresent = existingEntries.some((entry) =>
         entry.hooks.some((h) => h.type === "command" && h.command === command),
       );
@@ -166,13 +170,22 @@ function getScriptPath(env: AdapterEnv): string {
   return join(getConfigDir(env), BLUUD_DIR_NAME, hookScriptFileName(process.platform !== "win32"));
 }
 
-function buildHookCommand(scriptPath: string): string {
-  return hookScriptCommand(scriptPath);
+/**
+ * Null when the script path cannot be safely embedded in a shell command; the
+ * caller then leaves this tool unconfigured rather than writing a hook that
+ * would fail at session start.
+ */
+function buildHookCommand(scriptPath: string): string | null {
+  return hookScriptCommandOrNull(scriptPath);
 }
 
 function hasHook(text: string | null, scriptPath: string): boolean {
+  const command = buildHookCommand(scriptPath);
+  // An unquotable path has no writable command, so there is nothing pending —
+  // report it as already satisfied so `plan` shows no phantom change.
+  if (command === null) return true;
   if (text === null) return false;
-  return text.includes(buildHookCommand(scriptPath));
+  return text.includes(command);
 }
 
 export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
@@ -187,10 +200,12 @@ export async function uninstallClaudeCode(env: AdapterEnv): Promise<boolean> {
   const existing = await readTextFile(settingsPath);
   if (existing === null) return removedMarker || removedScript;
 
+  const command = buildHookCommand(scriptPath);
+  if (command === null) return removedMarker || removedScript;
+
   let changed = false;
   await mergeJsonFile<ClaudeSettings>(settingsPath, (current) => {
     if (!current.hooks?.SessionStart) return current;
-    const command = buildHookCommand(scriptPath);
     const next = { ...current };
     next.hooks = { ...next.hooks };
     const before = next.hooks.SessionStart ?? [];

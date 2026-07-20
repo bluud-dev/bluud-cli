@@ -17,16 +17,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 import { commandExists } from "./skills.js";
+// Shared with the skill-target registry so detection and installation can
+// never disagree about where a relocated config lives — see `agentHomes.ts`.
+import { claudeHome, codexHome } from "./agentHomes.js";
 
 export type AgentDetection = Record<string, boolean>;
-
-function claudeHome(): string {
-  return process.env.CLAUDE_CONFIG_DIR?.trim() || join(os.homedir(), ".claude");
-}
-
-function codexHome(): string {
-  return process.env.CODEX_HOME?.trim() || join(os.homedir(), ".codex");
-}
 
 const DIRECTORY_PROBES: Record<string, () => string[]> = {
   "claude-code": () => [claudeHome()],

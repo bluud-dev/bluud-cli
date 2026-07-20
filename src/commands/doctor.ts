@@ -17,6 +17,7 @@ import { loadProjectToken } from "../lib/config.js";
 import { planAll } from "../lib/adapters/index.js";
 import type { AdapterEnv } from "../lib/adapters/types.js";
 import { detectAgents } from "../lib/detect.js";
+import { detectRunningAgent } from "../lib/runningAgent.js";
 import { isSkillInstalled } from "../lib/skills.js";
 import { formatBytes } from "../lib/output.js";
 import { getFlagBoolean } from "../lib/args.js";
@@ -53,7 +54,11 @@ export const doctorCommand: Command = {
     const projectToken = await loadProjectToken(identity.projectId);
     const env = buildEnv(ctx, global);
 
-    const [detected, plans] = await Promise.all([detectAgents(SUPPORTED_AGENTS), planAll(env)]);
+    const [detected, plans, runningAgent] = await Promise.all([
+      detectAgents(SUPPORTED_AGENTS),
+      planAll(env),
+      detectRunningAgent(),
+    ]);
     const agentReports: AgentReport[] = SUPPORTED_AGENTS.map((agent) => ({
       agent,
       detected: detected[agent] ?? false,
@@ -68,6 +73,9 @@ export const doctorCommand: Command = {
           {
             identity,
             token_present: projectToken !== null,
+            platform: process.platform,
+            running_in_agent: runningAgent.isAgent,
+            running_agent: runningAgent.name,
             agents: agentReports,
             hooks: plans.map((p) => ({
               name: p.name,
@@ -87,6 +95,15 @@ export const doctorCommand: Command = {
     ctx.out.writeLine(`  id:     ${identity.projectId}`);
     ctx.out.writeLine(`  source: ${identity.identitySource}`);
     ctx.out.writeLine(`  token:  ${projectToken !== null ? "present" : "missing"}`);
+
+    ctx.out.writeLine("");
+    ctx.out.writeLine(`${pc.bold("Environment")}`);
+    ctx.out.writeLine(`  platform: ${process.platform}`);
+    if (runningAgent.isAgent) {
+      ctx.out.writeLine(`  session:  running inside ${runningAgent.name} — prompts suppressed`);
+    } else {
+      ctx.out.writeLine("  session:  interactive");
+    }
 
     if (status) {
       ctx.out.writeLine("");

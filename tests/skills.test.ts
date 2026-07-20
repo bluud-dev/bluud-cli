@@ -142,7 +142,7 @@ describe("installSkill via skills subprocess", () => {
 });
 
 describe("installSkill copy fallback", () => {
-  it("falls back to a real copy when `skills add` fails, reporting mode 'copy'", async () => {
+  it("falls back to a local install when `skills add` fails, materialising the skill", async () => {
     routeSpawn({
       npxAvailable: true,
       skillsAdd: { exitCode: 1, stderr: "skills: boom" },
@@ -156,7 +156,9 @@ describe("installSkill copy fallback", () => {
     });
 
     expect(result.installed).toBe(true);
-    expect(result.mode).toBe("copy");
+    // Either mode is a complete install; which one wins depends on whether the
+    // host filesystem permits links, so the contract is "reachable", not "linked".
+    expect(["symlink", "copy"]).toContain(result.mode);
     expect(result.message).toContain("skills: boom");
     // The skill files were actually materialised under the agent's project dir.
     const copied = join(workDir, ".claude", "skills", "bluud-memory", "SKILL.md");
@@ -164,7 +166,7 @@ describe("installSkill copy fallback", () => {
     expect(await readFile(copied, "utf8")).toContain("Bluud Memory Skill");
   });
 
-  it("copies directly when npx is unavailable", async () => {
+  it("installs to the canonical dir and fans out to the agent dir when npx is unavailable", async () => {
     routeSpawn({ npxAvailable: false });
 
     const result = await installSkill({
@@ -174,9 +176,32 @@ describe("installSkill copy fallback", () => {
       cwd: workDir,
     });
 
-    expect(result.mode).toBe("copy");
+    expect(result.installed).toBe(true);
+    expect(["symlink", "copy"]).toContain(result.mode);
     expect(mockedSpawn).not.toHaveBeenCalledWith("npx", expect.anything(), expect.anything());
+    // BLUUD_CLI_ARCHITECTURE.md §2.2: the files live once in `.agents/skills`…
+    expect(existsSync(join(workDir, ".agents", "skills", "bluud-memory", "SKILL.md"))).toBe(true);
+    // …and are reachable from the agent's own directory.
     expect(existsSync(join(workDir, ".claude", "skills", "bluud-memory", "SKILL.md"))).toBe(true);
+  });
+
+  it("copies straight into the agent dir, bypassing the canonical dir, when --copy is set", async () => {
+    routeSpawn({ npxAvailable: false });
+
+    const result = await installSkill({
+      skillName: "bluud-memory",
+      skillPath,
+      agent: "claude-code",
+      copy: true,
+      cwd: workDir,
+    });
+
+    expect(result.installed).toBe(true);
+    expect(result.mode).toBe("copy");
+    expect(existsSync(join(workDir, ".claude", "skills", "bluud-memory", "SKILL.md"))).toBe(true);
+    // `--copy` is the documented escape hatch for filesystems where the
+    // canonical-plus-link indirection is unwanted, so it must not create one.
+    expect(existsSync(join(workDir, ".agents", "skills", "bluud-memory"))).toBe(false);
   });
 
   it("skips an unknown agent with no known manual target", async () => {

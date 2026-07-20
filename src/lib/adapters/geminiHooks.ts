@@ -34,7 +34,7 @@ import { join } from "node:path";
 import { mergeJsonFile, readTextFile } from "./writer.js";
 import {
   BLUUD_DIR_NAME,
-  hookScriptCommand,
+  hookScriptCommandOrNull,
   hookScriptFileName,
   type HookScriptSpec,
 } from "./hookScript.js";
@@ -77,26 +77,38 @@ function geminiConfigDir(env: AdapterEnv): string {
   return env.global ? join(env.home, ".gemini") : join(env.cwd, ".gemini");
 }
 
-export function buildGeminiHookCommand(scriptPath: string): string {
-  return hookScriptCommand(scriptPath);
+/**
+ * Null when the script path cannot be safely embedded in a shell command; the
+ * caller then leaves this tool unconfigured rather than writing a hook that
+ * would fail at session start.
+ */
+export function buildGeminiHookCommand(scriptPath: string): string | null {
+  return hookScriptCommandOrNull(scriptPath);
 }
 
 export async function hasGeminiHook(settingsPath: string, scriptPath: string): Promise<boolean> {
+  const command = buildGeminiHookCommand(scriptPath);
+  // An unquotable path has no writable command, so there is nothing pending —
+  // report it as already satisfied so `plan` shows no phantom change.
+  if (command === null) return true;
   const text = await readTextFile(settingsPath);
   if (text === null) return false;
-  return text.includes(buildGeminiHookCommand(scriptPath));
+  return text.includes(command);
 }
 
+/** Returns false when the path was unquotable and no hook was written. */
 export async function applyGeminiSessionStartHook(
   settingsPath: string,
   scriptPath: string,
   hookName: string,
-): Promise<void> {
+): Promise<boolean> {
+  const command = buildGeminiHookCommand(scriptPath);
+  if (command === null) return false;
+
   await mergeJsonFile<GeminiSettings>(settingsPath, (current) => {
     const next = { ...current };
     next.hooks = { ...next.hooks };
     const existingEntries = next.hooks.SessionStart ?? [];
-    const command = buildGeminiHookCommand(scriptPath);
     const alreadyPresent = existingEntries.some(
       (entry) => entry.type === "command" && entry.command === command,
     );
@@ -105,6 +117,8 @@ export async function applyGeminiSessionStartHook(
       : [...existingEntries, { type: "command", command, name: hookName, timeout: 15000 }];
     return next;
   });
+
+  return true;
 }
 
 export async function removeGeminiSessionStartHook(
@@ -114,10 +128,12 @@ export async function removeGeminiSessionStartHook(
   const existing = await readTextFile(settingsPath);
   if (existing === null) return false;
 
+  const command = buildGeminiHookCommand(scriptPath);
+  if (command === null) return false;
+
   let changed = false;
   await mergeJsonFile<GeminiSettings>(settingsPath, (current) => {
     if (!current.hooks?.SessionStart) return current;
-    const command = buildGeminiHookCommand(scriptPath);
     const next = { ...current };
     next.hooks = { ...next.hooks };
     const before = next.hooks.SessionStart ?? [];

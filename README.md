@@ -32,7 +32,7 @@ Requires **Node.js 20 or newer**.
 
 **Identity is automatic.** Bluud identifies a project by its Git remote URL, falling back to a hash of the directory path when there's no remote. You never set a project ID by hand.
 
-**Pull happens first, and it's selective by default, not a dump.** At the start of a session your agent gets a lightweight index of the project's memory — titles, descriptions, hierarchy, ids, `updated_at` — never full node bodies. On tools with lifecycle hooks (Claude Code, Codex, Gemini CLI, Antigravity, Kimi Code CLI, Cline) this is a real `SessionStart`/`TaskStart` hook Bluud writes into the tool's own config, running `bluud pull --inject --index` automatically before your first message is even sent — a hook fires before there's a request to judge relevance against, so injecting the index is as far as it can safely go. Everywhere else, the bundled skill instructs the agent to pull that same index itself. Either way, the agent then scans the index against what you actually asked, and loads only the relevant node(s) in full with `bluud pull --inject --id <uuid>` (repeatable). The full tree — every node's body — stays one command away (`bluud pull --inject`, no other flags), for the agent to reach for explicitly when it judges the whole thing is genuinely needed; it's the exception, not the default.
+**Pull happens first, and it's selective by default, not a dump.** At the start of a session your agent gets a lightweight index of the project's memory — titles, descriptions, hierarchy, ids, `updated_at` — never full node bodies. On tools with lifecycle hooks (Claude Code, Codex, Gemini CLI, Antigravity, Kimi Code CLI, Cline, Hermes Agent, Pi, Kiro CLI) this is a real hook Bluud writes into the tool's own config — in whatever form that tool's hook architecture actually takes — running `bluud pull --inject --index` automatically before your first message is even sent — a hook fires before there's a request to judge relevance against, so injecting the index is as far as it can safely go. Everywhere else, the bundled skill instructs the agent to pull that same index itself. Either way, the agent then scans the index against what you actually asked, and loads only the relevant node(s) in full with `bluud pull --inject --id <uuid>` (repeatable). The full tree — every node's body — stays one command away (`bluud pull --inject`, no other flags), for the agent to reach for explicitly when it judges the whole thing is genuinely needed; it's the exception, not the default.
 
 **Push happens when it matters.** When a conversation produces something durable — a new convention, a resolved question, a completed task — your agent sends a minimal diff back with `bluud push`. Quietly, without asking. Sessions that only produce code don't write anything. Push is always agent-directed, on every tool, because deciding *whether* something is worth remembering is a judgment call no lifecycle hook can make — only pull is mechanical enough to automate.
 
@@ -121,11 +121,12 @@ npx bluud pull --json                                # full node objects, includ
 npx bluud pull --inject --index                      # lightweight index: id, breadcrumb, updated_at, description — no bodies
 npx bluud pull --inject --id <uuid>                   # full content for one or more specific nodes (repeatable)
 npx bluud pull --inject                              # full tree, every node's body — the "load everything" escape hatch
-npx bluud pull --inject --index --format gemini      # what every hook-capable tool actually runs: index wrapped in Gemini's hook envelope
+npx bluud pull --inject --index --format gemini      # index wrapped in Gemini CLI's hook envelope
 npx bluud pull --inject --index --format cline       # same, wrapped in Cline's hook envelope
+npx bluud pull --inject --index --format hermes      # same, wrapped in Hermes' envelope — and gated to the first turn
 ```
 
-`--index` and `--id` are mutually exclusive with each other (pick one), but each combines freely with `--format`: content selection (index / selected nodes / full tree) and envelope format (plain / gemini / cline) are independent choices. In skill mode (every tool without a lifecycle hook), the bundled skill's default workflow is index-first: pull `--index`, scan titles/descriptions/hierarchy for what's relevant to the request, then pull `--id` for just those nodes. On tools with a lifecycle hook, the hook itself runs `--inject --index` automatically — a hook fires before there's a request to judge relevance against, so it can only ever inject the index, never the full tree — and the agent still follows up with `--id` once it has an actual request to match against. Bare `--inject` (no `--index`/`--id`) still dumps the full tree either way — the exception an agent (not a hook) reaches for explicitly when it judges the whole thing is genuinely needed. `--format` only accepts `gemini` or `cline`, and wraps whatever content was selected (or the full tree, if neither `--index` nor `--id` was given). A quota warning (approaching the storage limit) prints to stderr regardless of mode.
+`--index` and `--id` are mutually exclusive with each other (pick one), but each combines freely with `--format`: content selection (index / selected nodes / full tree) and envelope format (plain / gemini / cline / hermes) are independent choices. In skill mode (every tool without a lifecycle hook), the bundled skill's default workflow is index-first: pull `--index`, scan titles/descriptions/hierarchy for what's relevant to the request, then pull `--id` for just those nodes. On tools with a lifecycle hook, the hook itself runs `--inject --index` automatically — a hook fires before there's a request to judge relevance against, so it can only ever inject the index, never the full tree — and the agent still follows up with `--id` once it has an actual request to match against. Bare `--inject` (no `--index`/`--id`) still dumps the full tree either way — the exception an agent (not a hook) reaches for explicitly when it judges the whole thing is genuinely needed. `--format` only accepts `gemini`, `cline`, or `hermes`, and wraps whatever content was selected (or the full tree, if neither `--index` nor `--id` was given). `--format hermes` additionally reads Hermes' hook payload from stdin and prints an empty `{}` without contacting the API on any turn but the first — Hermes' only injection point fires before every LLM call, so the once-per-session narrowing has to happen here. A quota warning (approaching the storage limit) prints to stderr regardless of mode.
 
 Auth: project token (no session/login needed — this is what the hook/skill calls on your behalf). Tier: free.
 
@@ -212,7 +213,23 @@ Auth: none required. Tier: free.
 
 ## Supported tools
 
-The CLI natively detects and installs the memory skill into 73 AI coding tools — every probe and installer below runs in-process; nothing shells out to an external CLI to do it. Six get a real lifecycle hook (`SessionStart`/`TaskStart` runs `bluud pull --inject --index` automatically, injecting the lightweight index — never the full tree, since a hook fires before there's a request to judge relevance against); the rest get the bundled skill's instructions, which tell the agent to pull and push itself. Several share the same `.agents/skills` convention, which Bluud's installer recognizes so it never tries to symlink that directory onto itself.
+The CLI natively detects and installs the memory skill into 73 AI coding tools — every probe and installer below runs in-process; nothing shells out to an external CLI to do it. Nine get a real lifecycle hook that runs `bluud pull --inject --index` automatically, injecting the lightweight index — never the full tree, since a hook fires before there's a request to judge relevance against. The rest get the bundled skill's instructions, which tell the agent to pull and push itself. Several share the same `.agents/skills` convention, which Bluud's installer recognizes so it never tries to symlink that directory onto itself.
+
+"Hook" is not one mechanism. These nine agree on *when* memory should load and on almost nothing else, so each adapter implements that tool's own hook architecture rather than a shared abstraction over them:
+
+| Mechanism | Tools |
+|---|---|
+| `SessionStart` command in a JSON settings file; stdout becomes context | Claude Code, Gemini CLI, Antigravity, Kimi Code CLI |
+| `SessionStart` command in a TOML settings file | Codex |
+| A standalone executable file whose *name* is the event (`TaskStart`) | Cline |
+| A `pre_llm_call` entry in a YAML config, narrowed to once-per-session | Hermes Agent |
+| A TypeScript extension module — the tool has no hooks config at all | Pi |
+| Declarative prompt documents — the tool's hooks cannot execute a command | Kiro CLI |
+
+Two of those deserve a note, because they are not the usual shape:
+
+- **Hermes** has no session-start event that can inject context — `on_session_start` is observer-only and `post_tool_call` is fire-and-forget. The only injection point is `pre_llm_call`, which fires before *every* LLM call. So Bluud's hook reads Hermes' own payload and no-ops unless `is_first_turn`, short-circuiting before any network call: a per-turn event, one pull per session.
+- **Kiro's** agent hooks can only prompt the agent (`then.type` is always `askAgent`) — they cannot run a command, so nothing can execute `bluud pull` on the agent's behalf. Bluud installs an always-included steering document plus a user-triggered hook, both instructing the agent to pull. This is genuine Kiro-native wiring, but it is agent-mediated rather than automatic.
 
 | Tool | Hook | Skill delivery |
 |---|---|---|
@@ -247,7 +264,7 @@ The CLI natively detects and installs the memory skill into 73 AI coding tools �
 | Gemini CLI | ✓ | `.agents/skills/bluud-memory` |
 | GitHub Copilot | — | `.agents/skills/bluud-memory` |
 | Goose | — | `.goose/skills/bluud-memory` |
-| Hermes Agent | — | `.hermes/skills/bluud-memory` |
+| Hermes Agent | ✓ | `.hermes/skills/bluud-memory` |
 | IBM Bob | — | `.bob/skills/bluud-memory` |
 | iFlow CLI | — | `.iflow/skills/bluud-memory` |
 | inference.sh | — | `.inferencesh/skills/bluud-memory` |
@@ -255,7 +272,7 @@ The CLI natively detects and installs the memory skill into 73 AI coding tools �
 | Junie | — | `.junie/skills/bluud-memory` |
 | Kilo Code | — | `.kilocode/skills/bluud-memory` |
 | Kimi Code CLI | ✓ | `.agents/skills/bluud-memory` |
-| Kiro CLI | — | `.kiro/skills/bluud-memory` |
+| Kiro CLI | ✓ | `.kiro/skills/bluud-memory` |
 | Kode | — | `.kode/skills/bluud-memory` |
 | Lingma | — | `.lingma/skills/bluud-memory` |
 | Loaf | — | `.agents/skills/bluud-memory` |
@@ -268,7 +285,7 @@ The CLI natively detects and installs the memory skill into 73 AI coding tools �
 | OpenClaw | — | `skills/bluud-memory` |
 | OpenCode | — | `.agents/skills/bluud-memory` |
 | OpenHands | — | `.openhands/skills/bluud-memory` |
-| Pi | — | `.pi/skills/bluud-memory` |
+| Pi | ✓ | `.pi/skills/bluud-memory` |
 | Pochi | — | `.pochi/skills/bluud-memory` |
 | PromptScript | — | `.agents/skills/bluud-memory` |
 | Qoder | — | `.qoder/skills/bluud-memory` |

@@ -86,6 +86,36 @@ export function renderClineHookOutput(content: string): string {
 }
 
 /**
+ * Wrap already-rendered content in Hermes' native `pre_llm_call` injection
+ * envelope: `{"context": "..."}`.
+ *
+ * Hermes is the one hook-capable tool whose *only* context-injection point is
+ * a per-turn event. Its `on_session_start` hook is observer-only and its
+ * `post_tool_call` hook is fire-and-forget — neither can contribute text to a
+ * turn — so `pre_llm_call` is the sole event that can carry memory into the
+ * conversation. See `adapters/hermes.ts` for how the resulting per-turn firing
+ * is narrowed back down to once-per-session.
+ *
+ * Hermes also accepts a Claude-compatible `decision`/`reason` shape, but the
+ * native `context` key is the stable contract across versions, so that is what
+ * Bluud emits.
+ *
+ * https://github.com/NousResearch/hermes-agent — website/docs/user-guide/features/hooks.md
+ */
+export function renderHermesHookOutput(content: string): string {
+  return JSON.stringify({ context: content });
+}
+
+/**
+ * Hermes' no-op response. An empty object is a well-formed "this hook
+ * contributed nothing"; empty stdout is not, for a contract that parses stdout
+ * as a single JSON object.
+ */
+export function renderHermesHookNoop(): string {
+  return JSON.stringify({});
+}
+
+/**
  * Render a memory tree as a lightweight index: one entry per node with its
  * `id`, an ancestor-title breadcrumb, `updated_at`, and `description` — never
  * `body`. This is the default entry point for skill-mode reading: an agent

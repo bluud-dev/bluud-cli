@@ -21,5 +21,12 @@
     "isolatedModules": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  // `src/hooks` holds authored *artifacts* that Bluud materializes into other
+  // tools' config directories, not source that belongs to this program: the
+  // POSIX/cmd hook scripts and the Pi extension template. The Pi template is
+  // Pi's TypeScript, not ours — it imports Pi's runtime, targets Pi's module
+  // system, and carries `@BLUUD_BINARY@` placeholder syntax that is not valid
+  // TypeScript until the adapter substitutes it. Compiling or typechecking it
+  // here would be a category error.
+  "exclude": ["node_modules", "dist", "src/hooks"]
 }

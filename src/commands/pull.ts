@@ -5,7 +5,7 @@
  * suitable for loading into agent context: `--index` for the lightweight
  * index (the default for every hook, and for skill-mode reading), `--id`
  * (repeatable) to load specific nodes' full content by id, or neither for the
- * full-tree dump. `--format` (gemini/cline) is an independent axis — it
+ * full-tree dump. `--format` (gemini/cline/hermes) is an independent axis — it
  * selects the hook envelope a tool's contract requires and wraps whichever
  * content `--index`/`--id`/neither selected; every hook-capable tool's
  * generated hook script passes `--index` (see `src/hooks/bluud-pull-hook.sh`),
@@ -21,19 +21,37 @@ import {
   isQuotaWarning,
   renderClineHookOutput,
   renderGeminiHookOutput,
+  renderHermesHookNoop,
+  renderHermesHookOutput,
   renderMemoryIndex,
   renderMemoryNodes,
   renderMemoryTree,
 } from "../lib/memory.js";
+import { hermesPayloadIsFirstTurn, readHookPayloadFromStdin } from "../lib/hookPayload.js";
 import type { Command, CommandContext } from "./index.js";
 
-const HOOK_FORMATS = new Set(["gemini", "cline"]);
+const HOOK_FORMATS = new Set(["gemini", "cline", "hermes"]);
 
 export const pullCommand: Command = {
   name: "pull",
   description: "Fetch memory for the current project",
 
   async run(ctx: CommandContext): Promise<number> {
+    // Hermes' only context-injection event (`pre_llm_call`) fires before
+    // *every* LLM call, not once per session. Injecting the memory index on
+    // every turn would both bloat the context window and spend a `pull`
+    // request per turn, so the once-per-session narrowing happens here, ahead
+    // of `requireIdentity`/`pullMemory`: on any turn but the first, this is a
+    // no-op that never touches the network. Every other tool's hook fires at
+    // session start already and needs no such gate.
+    if (getFlagBoolean(ctx.flags, "inject") && getFlagString(ctx.flags, "format") === "hermes") {
+      const payload = await readHookPayloadFromStdin();
+      if (!hermesPayloadIsFirstTurn(payload)) {
+        ctx.out.writeLine(renderHermesHookNoop());
+        return 0;
+      }
+    }
+
     const identity = await requireIdentity(ctx.cwd);
     const projectToken = await loadProjectToken(identity.projectId);
     if (projectToken === null) {
@@ -73,7 +91,7 @@ export const pullCommand: Command = {
       }
 
       // Content selection (index / selected nodes / full tree) and envelope
-      // format (plain / gemini / cline) are independent axes: every
+      // format (plain / gemini / cline / hermes) are independent axes: every
       // hook-capable tool's hook now requests `--index`, and hook envelopes
       // must be able to wrap it exactly like they wrap the full tree.
       const content = index
@@ -86,6 +104,8 @@ export const pullCommand: Command = {
         ctx.out.writeLine(renderGeminiHookOutput(content));
       } else if (format === "cline") {
         ctx.out.writeLine(renderClineHookOutput(content));
+      } else if (format === "hermes") {
+        ctx.out.writeLine(renderHermesHookOutput(content));
       } else {
         ctx.out.writeLine(content);
       }

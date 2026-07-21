@@ -348,7 +348,9 @@ describe("renderClineHookOutput", () => {
 
   it("wraps whatever content it's given — index or full tree — since format and content selection are orthogonal", () => {
     const tree = makeTree({
-      nodes: [makeNode({ id: "a", title: "Decision", description: "A decision", body: "Because X." })],
+      nodes: [
+        makeNode({ id: "a", title: "Decision", description: "A decision", body: "Because X." }),
+      ],
     });
 
     const output = renderClineHookOutput(renderMemoryIndex(tree));

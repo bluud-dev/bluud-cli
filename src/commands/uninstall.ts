@@ -13,6 +13,9 @@ import { uninstallGeminiCli } from "../lib/adapters/geminicli.js";
 import { uninstallAntigravity } from "../lib/adapters/antigravity.js";
 import { uninstallKimi } from "../lib/adapters/kimi.js";
 import { uninstallCline } from "../lib/adapters/cline.js";
+import { uninstallHermes } from "../lib/adapters/hermes.js";
+import { uninstallPi } from "../lib/adapters/pi.js";
+import { uninstallKiro } from "../lib/adapters/kiro.js";
 import { adapters as hookAdapters } from "../lib/adapters/index.js";
 import type { AdapterEnv } from "../lib/adapters/types.js";
 import { getFlagArray, getFlagBoolean } from "../lib/args.js";
@@ -31,6 +34,9 @@ const ADAPTER_UNINSTALLERS: Partial<Record<string, (env: AdapterEnv) => Promise<
   antigravity: uninstallAntigravity,
   "kimi-code-cli": uninstallKimi,
   cline: uninstallCline,
+  "hermes-agent": uninstallHermes,
+  pi: uninstallPi,
+  "kiro-cli": uninstallKiro,
 };
 
 interface UninstallReport {

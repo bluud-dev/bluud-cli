@@ -35,6 +35,10 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist", "node_modules", "coverage"],
+    // `src/hooks` is excluded for the same reason it is excluded from
+    // tsconfig.json: it holds materialized artifacts for *other* tools, and
+    // the Pi extension template is not valid TypeScript until the adapter
+    // substitutes its `@BLUUD_BINARY@` placeholder.
+    ignores: ["dist", "node_modules", "coverage", "src/hooks"],
   }
 );

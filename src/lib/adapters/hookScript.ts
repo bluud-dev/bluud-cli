@@ -43,7 +43,7 @@ import { atomicWriteFile, readTextFile } from "./writer.js";
 import type { AdapterEnv } from "./types.js";
 
 /** `--format` value for `bluud pull --inject`; empty means plain Markdown. */
-export type HookScriptFormat = "" | "gemini" | "cline";
+export type HookScriptFormat = "" | "gemini" | "cline" | "hermes";
 
 const MANAGED_MARKER = "bluud:managed";
 /** Name of the per-tool directory Bluud materializes its scripts into. */
@@ -86,12 +86,22 @@ export interface HookScriptPlan {
  * The marker can never be line 1 — the shebang must hold that position for the
  * OS to pick the right interpreter, and `@echo off` must hold it on Windows so
  * cmd does not echo the script — so this matches whole lines rather than a
- * prefix. Both comment syntaxes are accepted because the two templates use
- * different ones for the same marker.
+ * prefix. Four comment syntaxes are accepted because the artifacts Bluud
+ * materializes span four languages that share this one marker: `#` for the
+ * POSIX shell template, `rem` for the cmd template, `//` for the Pi extension
+ * (`bluud-pi-extension.ts`), which is TypeScript and has no `#` comment form,
+ * and `<!-- -->` for Kiro's steering document, which is Markdown — where a
+ * bare `#` line renders as a visible heading rather than a comment.
  */
 export function isManagedByBluud(content: string): boolean {
   return content.split("\n").some((line) => {
     const trimmed = line.trim();
+    if (trimmed.startsWith("<!--") && trimmed.endsWith("-->")) {
+      return trimmed.slice(4, -3).trim() === MANAGED_MARKER;
+    }
+    if (trimmed.startsWith("//")) {
+      return trimmed.slice(2).trim() === MANAGED_MARKER;
+    }
     if (trimmed.startsWith("#")) {
       return trimmed.slice(1).trim() === MANAGED_MARKER;
     }

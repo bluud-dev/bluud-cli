@@ -1,0 +1,10 @@
+dist
+node_modules
+coverage
+
+# Authored artifacts that Bluud materializes into *other* tools' config
+# directories — not source belonging to this program. `bluud-pi-extension.ts`
+# is Pi's TypeScript, and carries `@BLUUD_BINARY@` placeholder syntax that is
+# not parseable until the adapter substitutes it. Excluded here for the same
+# reason `src/hooks` is excluded from tsconfig.json and eslint.config.js.
+src/hooks

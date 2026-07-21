@@ -433,7 +433,9 @@ describe("pullCommand", () => {
     const parsed = JSON.parse(written);
     expect(parsed.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(parsed.hookSpecificOutput.additionalContext).toContain("# Bluud project memory (index)");
-    expect(parsed.hookSpecificOutput.additionalContext).not.toContain("Full body that must not appear");
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain(
+      "Full body that must not appear",
+    );
   });
 
   it("combines --id with --format to wrap selected nodes in a hook envelope", async () => {

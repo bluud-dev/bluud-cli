@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"__CWD__/.claude/bluud/bluud-pull-hook.cmd\""
+            "command": "\"__CWD__/.claude/bluud/__HOOK_SCRIPT__\""
           }
         ]
       }

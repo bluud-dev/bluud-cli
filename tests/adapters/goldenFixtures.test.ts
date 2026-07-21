@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { renderHookScript } from "../../src/lib/adapters/hookScript.js";
+import { renderHookScript, hookScriptFileName } from "../../src/lib/adapters/hookScript.js";
 import { bundledHooksPath } from "../../src/lib/skills.js";
 import { claudeCodeAdapter } from "../../src/lib/adapters/claudecode.js";
 import type { AdapterEnv } from "../../src/lib/adapters/types.js";
@@ -89,11 +89,21 @@ describe("golden fixtures: claude-code adapter output", () => {
     const written = await readFile(join(cwd, ".claude", "settings.local.json"), "utf8");
     const golden = await readFixture("claudecode", "settings.local.json.golden");
 
-    // The script path embeds this run's temp cwd, so normalize it out before
-    // comparing — everything else in the JSON (schema, hook shape, indentation,
-    // trailing newline) must match the fixture exactly.
-    const normalized = written.split(cwd.replace(/\\/g, "/")).join("__CWD__");
+    // Two things in that path are volatile, and a single fixture cannot encode
+    // either: this run's temp cwd, and the hook script's file name, which is
+    // .cmd on Windows and .sh everywhere else. Both are normalized to
+    // placeholders so the rest of the JSON — schema, hook shape, indentation,
+    // trailing newline — still has to match the fixture byte-for-byte.
+    const expectedScript = hookScriptFileName(process.platform !== "win32");
+    const normalized = written
+      .split(cwd.replace(/\\/g, "/"))
+      .join("__CWD__")
+      .split(expectedScript)
+      .join("__HOOK_SCRIPT__");
     expect(normalized).toBe(golden);
+    // Normalizing the name out would otherwise stop this test noticing that the
+    // wrong platform's script was referenced, so assert it separately.
+    expect(written).toContain(expectedScript);
   });
 
   it("writes the global CLAUDE.md marker block matching the golden fixture", async () => {

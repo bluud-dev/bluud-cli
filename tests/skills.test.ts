@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, basename } from "node:path";
+import { join, basename, dirname, relative } from "node:path";
 
 vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
@@ -190,8 +190,15 @@ describe("createSymlinkOrCopy / readSymlink", () => {
 
     await createSymlinkOrCopy(target, linkPath);
 
+    // Both arguments are platform-dependent, not just the link type: a junction
+    // stores a fully-qualified path, while the POSIX branch deliberately stores
+    // a target relative to the link's own directory so the tree survives being
+    // moved (see tests/crossPlatform.test.ts). Asserting the absolute `target`
+    // on both platforms only ever held on Windows.
     const expectedType = process.platform === "win32" ? "junction" : "dir";
-    expect(symlinkSpy).toHaveBeenCalledWith(target, linkPath, expectedType);
+    const expectedTarget =
+      process.platform === "win32" ? target : relative(dirname(linkPath), target);
+    expect(symlinkSpy).toHaveBeenCalledWith(expectedTarget, linkPath, expectedType);
     // The fallback is a real, independent copy: mutating the target afterward
     // must not affect the link path, which a symlink would have reflected.
     expect(await readFile(join(linkPath, "SKILL.md"), "utf8")).toBe("copied-not-linked");

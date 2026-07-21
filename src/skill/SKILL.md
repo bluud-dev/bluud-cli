@@ -46,12 +46,16 @@ almost everything anyway. When you judge that's the case, run `bluud pull
 remains available exactly for this. It is the exception, not the default —
 reach for the index-then-load workflow above first.
 
-Three conditions where you skip all of this:
+**The index may already be in your context.** On tools that support lifecycle
+hooks, Bluud injects the same lightweight index automatically before you see
+the first message — look for a "Bluud project memory (index)" section already
+present. When it's there, skip the `--index` pull above (it already ran); you
+still need to scan it against the user's actual request and load whatever's
+relevant with `--id`, exactly as if you had pulled the index yourself. The
+hook only automates the first step, never the judgment call.
 
-- **Memory is already in your context.** On tools that support lifecycle
-  hooks, Bluud injects the full tree automatically before you see the first
-  message. If a "Bluud project memory" section is already present, do not
-  pull again.
+Two further conditions where you skip loading anything:
+
 - **The index shows nothing relevant.** Not every request touches recorded
   memory. Proceed without loading anything rather than loading nodes on the
   off chance they matter.

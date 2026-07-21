@@ -326,6 +326,27 @@ describe("hook script execution", () => {
     )) as string;
 
     const { stdout } = await runScript(scriptPath);
-    expect(stdout).toContain("pull --inject --format=gemini");
+    expect(stdout).toContain("pull --inject --index --format=gemini");
+  });
+
+  it("always requests the lightweight index, never the full tree, regardless of format", async () => {
+    const baseEnv = await makeEnv();
+    const path = join(cwd, isWindows ? "argecho.cmd" : "argecho");
+    await writeFile(
+      path,
+      isWindows
+        ? ["@echo off", "echo ARGS:%*", "exit /b 0", ""].join("\r\n")
+        : ["#!/usr/bin/env sh", 'echo "ARGS:$*"', "exit 0", ""].join("\n"),
+      "utf8",
+    );
+    if (!isWindows) await chmod(path, 0o755);
+
+    const scriptPath = (await applyHookScript(
+      { ...baseEnv, bluudBinary: path },
+      { dir: join(cwd, "bluud") }, // no format — the plain Markdown path
+    )) as string;
+
+    const { stdout } = await runScript(scriptPath);
+    expect(stdout).toContain("pull --inject --index");
   });
 });

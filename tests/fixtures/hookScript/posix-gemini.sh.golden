@@ -29,6 +29,13 @@
 #
 # Hook payloads arrive on stdin (Cline's TaskStart JSON, Claude Code's
 # SessionStart JSON). `bluud pull` needs none of them, so stdin is left unread.
+#
+# `--index` injects the lightweight index (titles, ids, hierarchy,
+# descriptions), never node bodies — the hook fires before there is a user
+# request to match content against, so the agent decides what's relevant once
+# it sees one, then loads it with `bluud pull --inject --id <uuid>` itself.
+# This is the same default BLUUD_CLI_ARCHITECTURE.md documents for skill-mode
+# reading; the hook only automates the first step.
 
 BLUUD_BINARY='/usr/local/bin/bluud'
 BLUUD_FORMAT='gemini'
@@ -36,9 +43,9 @@ BLUUD_FORMAT='gemini'
 bluud_failed=''
 
 if [ -n "$BLUUD_FORMAT" ]; then
-  "$BLUUD_BINARY" pull --inject "--format=$BLUUD_FORMAT" || bluud_failed=1
+  "$BLUUD_BINARY" pull --inject --index "--format=$BLUUD_FORMAT" || bluud_failed=1
 else
-  "$BLUUD_BINARY" pull --inject || bluud_failed=1
+  "$BLUUD_BINARY" pull --inject --index || bluud_failed=1
 fi
 
 if [ -n "$bluud_failed" ]; then

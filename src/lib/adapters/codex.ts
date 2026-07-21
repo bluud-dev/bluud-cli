@@ -2,8 +2,10 @@
  * Codex CLI hook adapter.
  *
  * Writes a `SessionStart` hook into `~/.codex/config.toml` (global) or
- * `<repo>/.codex/config.toml` (project) so Codex runs `bluud pull --inject`
- * at the start of a session and folds its stdout into `additionalContext`.
+ * `<repo>/.codex/config.toml` (project) so Codex runs
+ * `bluud pull --inject --index` at the start of a session and folds its
+ * stdout (the lightweight index, never the full tree — see
+ * `bluud-pull-hook.sh`) into `additionalContext`.
  *
  * Schema (verified against https://developers.openai.com/codex/hooks and
  * https://developers.openai.com/codex/config-reference):

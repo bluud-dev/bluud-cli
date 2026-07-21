@@ -3,10 +3,13 @@
  *
  * Used by the skill/hook at session start. `--inject` prints memory in a form
  * suitable for loading into agent context: `--index` for the lightweight
- * index (default skill-mode reading), `--id` (repeatable) to load specific
- * nodes' full content by id, or neither for the full-tree dump. Hooks always
- * use plain `--inject` (optionally with `--format`) — index/id are a
- * skill-mode-only addition and never combine with `--format`.
+ * index (the default for every hook, and for skill-mode reading), `--id`
+ * (repeatable) to load specific nodes' full content by id, or neither for the
+ * full-tree dump. `--format` (gemini/cline) is an independent axis — it
+ * selects the hook envelope a tool's contract requires and wraps whichever
+ * content `--index`/`--id`/neither selected; every hook-capable tool's
+ * generated hook script passes `--index` (see `src/hooks/bluud-pull-hook.sh`),
+ * combined with `--format` for the tools that need an envelope.
  */
 
 import { requireIdentity } from "../lib/identity.js";
@@ -68,22 +71,23 @@ export const pullCommand: Command = {
           code: "config_error",
         });
       }
-      if ((index || ids.length > 0) && format !== undefined) {
-        throw new CliError("--index/--id and --format cannot be combined; pick one.", {
-          code: "config_error",
-        });
-      }
 
-      if (index) {
-        ctx.out.writeLine(renderMemoryIndex(tree));
-      } else if (ids.length > 0) {
-        ctx.out.writeLine(renderMemoryNodes(tree, ids));
-      } else if (format === "gemini") {
-        ctx.out.writeLine(renderGeminiHookOutput(tree));
+      // Content selection (index / selected nodes / full tree) and envelope
+      // format (plain / gemini / cline) are independent axes: every
+      // hook-capable tool's hook now requests `--index`, and hook envelopes
+      // must be able to wrap it exactly like they wrap the full tree.
+      const content = index
+        ? renderMemoryIndex(tree)
+        : ids.length > 0
+          ? renderMemoryNodes(tree, ids)
+          : renderMemoryTree(tree);
+
+      if (format === "gemini") {
+        ctx.out.writeLine(renderGeminiHookOutput(content));
       } else if (format === "cline") {
-        ctx.out.writeLine(renderClineHookOutput(tree));
+        ctx.out.writeLine(renderClineHookOutput(content));
       } else {
-        ctx.out.writeLine(renderMemoryTree(tree));
+        ctx.out.writeLine(content);
       }
       return 0;
     }

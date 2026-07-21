@@ -52,31 +52,37 @@ function renderNode(node: MemoryNode): string[] {
 }
 
 /**
- * Render a memory tree as the JSON envelope Gemini CLI's `SessionStart` hook
- * contract requires: hooks must print *only* a single JSON object to stdout
- * (any stray plain text breaks its parser), with the injected text carried in
- * `hookSpecificOutput.additionalContext`.
+ * Wrap already-rendered content in the JSON envelope Gemini CLI's
+ * `SessionStart` hook contract requires: hooks must print *only* a single
+ * JSON object to stdout (any stray plain text breaks its parser), with the
+ * injected text carried in `hookSpecificOutput.additionalContext`.
+ *
+ * Takes rendered `content` rather than a `MemoryTree` so the caller decides
+ * *what* to render (index, selected nodes, or the full tree via
+ * `renderMemoryTree`) independently of *how* it's wrapped for this tool —
+ * envelope format and content selection are orthogonal, not coupled.
  *
  * https://github.com/google-gemini/gemini-cli/blob/main/docs/hooks/reference.md
  */
-export function renderGeminiHookOutput(tree: MemoryTree): string {
+export function renderGeminiHookOutput(content: string): string {
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "SessionStart",
-      additionalContext: renderMemoryTree(tree),
+      additionalContext: content,
     },
   });
 }
 
 /**
- * Render a memory tree as the JSON envelope Cline's `TaskStart` hook contract
- * requires: `contextModification` is folded into the *next* API request (not
- * the current turn) per Cline's hooks documentation.
+ * Wrap already-rendered content in the JSON envelope Cline's `TaskStart` hook
+ * contract requires: `contextModification` is folded into the *next* API
+ * request (not the current turn) per Cline's hooks documentation. See
+ * `renderGeminiHookOutput` for why this takes rendered content, not a tree.
  *
  * https://docs.cline.bot/features/hooks
  */
-export function renderClineHookOutput(tree: MemoryTree): string {
-  return JSON.stringify({ contextModification: renderMemoryTree(tree) });
+export function renderClineHookOutput(content: string): string {
+  return JSON.stringify({ contextModification: content });
 }
 
 /**
@@ -87,6 +93,15 @@ export function renderClineHookOutput(tree: MemoryTree): string {
  * and loads only those with `renderMemoryNodes`. `bluud pull --inject` (no
  * `--index`) remains the unconditional full-tree dump for when an agent
  * genuinely needs everything.
+ *
+ * This is also what every hook-capable tool's `SessionStart`/`TaskStart` hook
+ * now injects (see `src/hooks/bluud-pull-hook.sh`/`.cmd`) instead of the full
+ * tree: a hook fires before there is a user request to judge relevance
+ * against, so it can only inject the index and let the agent load specific
+ * nodes once it sees an actual request. The trailing hint line exists for
+ * exactly that case — the agent may be acting on hook-injected context
+ * without having freshly read the skill's instructions, so the follow-up
+ * command needs to be self-evident from the injected text alone.
  *
  * Deterministic and side-effect free, like `renderMemoryTree`.
  */
@@ -101,6 +116,12 @@ export function renderMemoryIndex(tree: MemoryTree): string {
   for (const node of tree.nodes) {
     lines.push(...renderIndexEntry(node, byId));
   }
+
+  lines.push(
+    "",
+    "To load one or more of these in full, run: bluud pull --inject --id <uuid> " +
+      "(repeat --id for more than one).",
+  );
 
   return lines.join("\n");
 }

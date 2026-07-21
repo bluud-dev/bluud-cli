@@ -399,28 +399,78 @@ describe("pullCommand", () => {
     await expect(pullCommand.run(ctx)).rejects.toMatchObject({ code: "config_error" });
   });
 
-  it("rejects combining --index with --format", async () => {
+  it("combines --index with --format to wrap the index in a hook envelope — this is what every hook now sends", async () => {
     await setupProjectToken(tempProject);
-    const pullMemory = vi.fn().mockResolvedValue(makeTree());
+    const tree = makeTree({
+      nodes: [
+        {
+          id: "node-1",
+          project_id: "project-id",
+          parent_id: null,
+          title: "Architecture",
+          description: "Core architecture decisions",
+          body: "Full body that must not appear in an index-wrapped hook payload.",
+          size_bytes: 100,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          depth: 0,
+        },
+      ],
+      total_size_bytes: 100,
+      quota_usage_ratio: 0.05,
+    });
+    const pullMemory = vi.fn().mockResolvedValue(tree);
     const ctx = makeContext({
       cwd: tempProject,
       flags: { inject: true, index: true, format: "gemini" },
       api: { pullMemory } as unknown as ApiClient,
     });
 
-    await expect(pullCommand.run(ctx)).rejects.toMatchObject({ code: "config_error" });
+    const code = await pullCommand.run(ctx);
+
+    expect(code).toBe(0);
+    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = JSON.parse(written);
+    expect(parsed.hookSpecificOutput.hookEventName).toBe("SessionStart");
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("# Bluud project memory (index)");
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain("Full body that must not appear");
   });
 
-  it("rejects combining --id with --format", async () => {
+  it("combines --id with --format to wrap selected nodes in a hook envelope", async () => {
     await setupProjectToken(tempProject);
-    const pullMemory = vi.fn().mockResolvedValue(makeTree());
+    const tree = makeTree({
+      nodes: [
+        {
+          id: "node-1",
+          project_id: "project-id",
+          parent_id: null,
+          title: "Decision",
+          description: "A decision",
+          body: "Because X.",
+          size_bytes: 10,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          depth: 0,
+        },
+      ],
+      total_size_bytes: 10,
+      quota_usage_ratio: 0.1,
+    });
+    const pullMemory = vi.fn().mockResolvedValue(tree);
     const ctx = makeContext({
       cwd: tempProject,
       flags: { inject: true, id: "node-1", format: "cline" },
       api: { pullMemory } as unknown as ApiClient,
     });
 
-    await expect(pullCommand.run(ctx)).rejects.toMatchObject({ code: "config_error" });
+    const code = await pullCommand.run(ctx);
+
+    expect(code).toBe(0);
+    const written = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    const parsed = JSON.parse(written);
+    expect(Object.keys(parsed)).toEqual(["contextModification"]);
+    expect(parsed.contextModification).toContain("## Decision");
+    expect(parsed.contextModification).toContain("Because X.");
   });
 
   it("surfaces a config_error naming the id when --id references a node that doesn't exist", async () => {

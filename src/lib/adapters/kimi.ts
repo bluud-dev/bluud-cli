@@ -9,7 +9,7 @@
  *
  *   [[hooks]]
  *   event = "UserPromptSubmit"
- *   command = '<bluud binary> pull --inject'
+ *   command = '<bluud binary> pull --inject --index'
  *   timeout = 30
  *
  * Kimi Code CLI's hook array is flat (one `[[hooks]]` table per hook, keyed
@@ -27,11 +27,13 @@
  * reaches the model here rather than being silently dropped.
  *
  * The tradeoff: `UserPromptSubmit` fires on every user turn, not once per
- * session, so `bluud pull --inject` runs (and its output is re-injected)
- * every turn rather than only at session start. This is the only mechanism
- * Kimi documents for automatic context injection, so it is the correct
- * choice despite firing more often than the other adapters' SessionStart
- * hooks.
+ * session, so `bluud pull --inject --index` runs (and its output is
+ * re-injected) every turn rather than only at session start. This is the
+ * only mechanism Kimi documents for automatic context injection, so it is the
+ * correct choice despite firing more often than the other adapters' SessionStart
+ * hooks — and injecting the lightweight index rather than the full tree on
+ * every one of those turns keeps the repetition cheap instead of compounding
+ * the cost of a full-tree dump every message.
  *
  * Only the user-level config (`~/.kimi-code/config.toml`) is documented for
  * hooks, so this adapter is a no-op in project (`--global` absent) scope.

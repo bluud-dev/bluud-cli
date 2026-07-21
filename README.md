@@ -32,7 +32,7 @@ Requires **Node.js 20 or newer**.
 
 **Identity is automatic.** Bluud identifies a project by its Git remote URL, falling back to a hash of the directory path when there's no remote. You never set a project ID by hand.
 
-**Pull happens first.** At the start of a session your agent loads the project's memory before your first message is even sent. On tools with lifecycle hooks (Claude Code, Codex, Gemini CLI, Antigravity, Kimi Code CLI, Cline) this is a real `SessionStart` hook Bluud writes into the tool's own config, which runs `bluud pull --inject` (the full tree) automatically. Everywhere else, the bundled skill drives the CLI itself, and defaults to reading selectively rather than dumping everything: it pulls a lightweight index first (titles, descriptions, hierarchy), decides which nodes are actually relevant to what you asked, and loads only those in full — falling back to the full tree only when it judges the whole thing is genuinely needed.
+**Pull happens first, and it's selective by default, not a dump.** At the start of a session your agent gets a lightweight index of the project's memory — titles, descriptions, hierarchy, ids, `updated_at` — never full node bodies. On tools with lifecycle hooks (Claude Code, Codex, Gemini CLI, Antigravity, Kimi Code CLI, Cline) this is a real `SessionStart`/`TaskStart` hook Bluud writes into the tool's own config, running `bluud pull --inject --index` automatically before your first message is even sent — a hook fires before there's a request to judge relevance against, so injecting the index is as far as it can safely go. Everywhere else, the bundled skill instructs the agent to pull that same index itself. Either way, the agent then scans the index against what you actually asked, and loads only the relevant node(s) in full with `bluud pull --inject --id <uuid>` (repeatable). The full tree — every node's body — stays one command away (`bluud pull --inject`, no other flags), for the agent to reach for explicitly when it judges the whole thing is genuinely needed; it's the exception, not the default.
 
 **Push happens when it matters.** When a conversation produces something durable — a new convention, a resolved question, a completed task — your agent sends a minimal diff back with `bluud push`. Quietly, without asking. Sessions that only produce code don't write anything. Push is always agent-directed, on every tool, because deciding *whether* something is worth remembering is a judgment call no lifecycle hook can make — only pull is mechanical enough to automate.
 
@@ -116,16 +116,16 @@ Auth: session (login required — unlike `doctor`, this command fails outright i
 Fetch the current project's memory tree. Used by the skill/hook at session start; also useful standalone.
 
 ```bash
-npx bluud pull                              # "Pulled N node(s), N bytes."
-npx bluud pull --json                       # full node objects, including IDs — needed to build a push diff
-npx bluud pull --inject --index             # lightweight index: id, breadcrumb, updated_at, description — no bodies
-npx bluud pull --inject --id <uuid>         # full content for one or more specific nodes (repeatable)
-npx bluud pull --inject                     # full tree, every node's body — the "load everything" escape hatch
-npx bluud pull --inject --format gemini     # Gemini CLI hook-output shape (always full tree; hooks are unchanged)
-npx bluud pull --inject --format cline      # Cline hook-output shape (always full tree; hooks are unchanged)
+npx bluud pull                                       # "Pulled N node(s), N bytes."
+npx bluud pull --json                                # full node objects, including IDs — needed to build a push diff
+npx bluud pull --inject --index                      # lightweight index: id, breadcrumb, updated_at, description — no bodies
+npx bluud pull --inject --id <uuid>                   # full content for one or more specific nodes (repeatable)
+npx bluud pull --inject                              # full tree, every node's body — the "load everything" escape hatch
+npx bluud pull --inject --index --format gemini      # what every hook-capable tool actually runs: index wrapped in Gemini's hook envelope
+npx bluud pull --inject --index --format cline       # same, wrapped in Cline's hook envelope
 ```
 
-`--index` and `--id` are mutually exclusive with each other and with `--format`. In skill mode (every tool without a lifecycle hook), the bundled skill's default workflow is now index-first: pull `--index`, scan titles/descriptions/hierarchy for what's relevant to the request, then pull `--id` for just those nodes. Bare `--inject` (no `--index`/`--id`) still dumps the full tree — the skill reaches for it only when it decides the whole tree is genuinely needed. `--format` only applies with plain `--inject` (full tree) and only accepts `gemini` or `cline`; those hook-driven paths are unchanged by this. A quota warning (approaching the storage limit) prints to stderr regardless of mode.
+`--index` and `--id` are mutually exclusive with each other (pick one), but each combines freely with `--format`: content selection (index / selected nodes / full tree) and envelope format (plain / gemini / cline) are independent choices. In skill mode (every tool without a lifecycle hook), the bundled skill's default workflow is index-first: pull `--index`, scan titles/descriptions/hierarchy for what's relevant to the request, then pull `--id` for just those nodes. On tools with a lifecycle hook, the hook itself runs `--inject --index` automatically — a hook fires before there's a request to judge relevance against, so it can only ever inject the index, never the full tree — and the agent still follows up with `--id` once it has an actual request to match against. Bare `--inject` (no `--index`/`--id`) still dumps the full tree either way — the exception an agent (not a hook) reaches for explicitly when it judges the whole thing is genuinely needed. `--format` only accepts `gemini` or `cline`, and wraps whatever content was selected (or the full tree, if neither `--index` nor `--id` was given). A quota warning (approaching the storage limit) prints to stderr regardless of mode.
 
 Auth: project token (no session/login needed — this is what the hook/skill calls on your behalf). Tier: free.
 
@@ -212,7 +212,7 @@ Auth: none required. Tier: free.
 
 ## Supported tools
 
-The CLI natively detects and installs the memory skill into 73 AI coding tools — every probe and installer below runs in-process; nothing shells out to an external CLI to do it. Six get a real lifecycle hook (`SessionStart` runs `bluud pull --inject` automatically); the rest get the bundled skill's instructions, which tell the agent to pull and push itself. Several share the same `.agents/skills` convention, which Bluud's installer recognizes so it never tries to symlink that directory onto itself.
+The CLI natively detects and installs the memory skill into 73 AI coding tools — every probe and installer below runs in-process; nothing shells out to an external CLI to do it. Six get a real lifecycle hook (`SessionStart`/`TaskStart` runs `bluud pull --inject --index` automatically, injecting the lightweight index — never the full tree, since a hook fires before there's a request to judge relevance against); the rest get the bundled skill's instructions, which tell the agent to pull and push itself. Several share the same `.agents/skills` convention, which Bluud's installer recognizes so it never tries to symlink that directory onto itself.
 
 | Tool | Hook | Skill delivery |
 |---|---|---|

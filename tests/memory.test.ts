@@ -224,6 +224,14 @@ describe("renderMemoryIndex", () => {
     expect(output).toContain("- Minimal");
     expect(output).not.toMatch(/- Minimal\n {2}\n/);
   });
+
+  it("ends with a self-documenting hint naming the repeatable --id follow-up", () => {
+    const output = renderMemoryIndex(makeTree({ nodes: [makeNode({ title: "Architecture" })] }));
+    expect(output).toContain(
+      "To load one or more of these in full, run: bluud pull --inject --id <uuid> " +
+        "(repeat --id for more than one).",
+    );
+  });
 });
 
 describe("renderMemoryNodes", () => {
@@ -301,7 +309,7 @@ describe("renderGeminiHookOutput", () => {
       nodes: [makeNode({ title: "Rule", description: "A rule", body: "Details." })],
     });
 
-    const output = renderGeminiHookOutput(tree);
+    const output = renderGeminiHookOutput(renderMemoryTree(tree));
 
     // Gemini CLI requires stdout to be *only* JSON — no trailing newline noise
     // or stray text is embedded.
@@ -309,6 +317,18 @@ describe("renderGeminiHookOutput", () => {
     expect(parsed.hookSpecificOutput.hookEventName).toBe("SessionStart");
     expect(parsed.hookSpecificOutput.additionalContext).toContain("## Rule");
     expect(parsed.hookSpecificOutput.additionalContext).toContain("Details.");
+  });
+
+  it("wraps whatever content it's given — index or full tree — since format and content selection are orthogonal", () => {
+    const tree = makeTree({
+      nodes: [makeNode({ id: "a", title: "Rule", description: "A rule", body: "Details." })],
+    });
+
+    const output = renderGeminiHookOutput(renderMemoryIndex(tree));
+
+    const parsed = JSON.parse(output);
+    expect(parsed.hookSpecificOutput.additionalContext).toContain("# Bluud project memory (index)");
+    expect(parsed.hookSpecificOutput.additionalContext).not.toContain("Details.");
   });
 });
 
@@ -318,11 +338,23 @@ describe("renderClineHookOutput", () => {
       nodes: [makeNode({ title: "Decision", description: "A decision", body: "Because X." })],
     });
 
-    const output = renderClineHookOutput(tree);
+    const output = renderClineHookOutput(renderMemoryTree(tree));
 
     const parsed = JSON.parse(output);
     expect(Object.keys(parsed)).toEqual(["contextModification"]);
     expect(parsed.contextModification).toContain("## Decision");
     expect(parsed.contextModification).toContain("Because X.");
+  });
+
+  it("wraps whatever content it's given — index or full tree — since format and content selection are orthogonal", () => {
+    const tree = makeTree({
+      nodes: [makeNode({ id: "a", title: "Decision", description: "A decision", body: "Because X." })],
+    });
+
+    const output = renderClineHookOutput(renderMemoryIndex(tree));
+
+    const parsed = JSON.parse(output);
+    expect(parsed.contextModification).toContain("# Bluud project memory (index)");
+    expect(parsed.contextModification).not.toContain("Because X.");
   });
 });

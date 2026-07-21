@@ -2,8 +2,11 @@
  * Claude Code hook adapter.
  *
  * Writes a `SessionStart` hook into Claude Code's settings file so that every
- * new conversation runs `bluud pull --inject` and loads project memory into
- * the context.
+ * new conversation runs `bluud pull --inject --index` and loads the
+ * lightweight memory index into context — never the full tree, since the
+ * hook fires before there is a user request to judge relevance against; the
+ * agent loads specific nodes itself with `bluud pull --inject --id <uuid>`
+ * once it sees one.
  *
  * Schema (verified against https://code.claude.com/docs/en/hooks):
  *   hooks.SessionStart: Array<{ matcher?: string; hooks: Array<{ type: "command"; command: string }> }>

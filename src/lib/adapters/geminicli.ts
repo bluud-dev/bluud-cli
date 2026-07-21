@@ -3,7 +3,8 @@
  *
  * Writes a `SessionStart` hook into `~/.gemini/settings.json` (global) or
  * `<repo>/.gemini/settings.json` (project) so Gemini CLI runs
- * `bluud pull --inject --format=gemini` at session start.
+ * `bluud pull --inject --index --format=gemini` at session start — the
+ * lightweight index wrapped in Gemini's hook envelope, never the full tree.
  *
  * See `geminiHooks.ts` for the hook schema and the shared merge logic this
  * adapter shares with the Antigravity adapter (both read/write the identical

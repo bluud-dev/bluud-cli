@@ -2,8 +2,12 @@
  * Materialization of the bundled Bluud hook scripts.
  *
  * Every hook-capable tool ultimately needs the same thing at session start:
- * run `bluud pull --inject` and hand its stdout to the agent. Two constraints
- * make a plain inline command the wrong thing to store in a tool's config:
+ * run `bluud pull --inject --index` and hand its stdout to the agent — the
+ * lightweight index, not the full tree, since a hook fires before there is a
+ * user request to judge relevance against (the agent loads specific nodes
+ * itself with `bluud pull --inject --id <uuid>` once it sees one). Two
+ * constraints make a plain inline command the wrong thing to store in a
+ * tool's config:
  *
  * 1. **The `bluud` path is volatile.** Under `npx bluud` the executable lives
  *    in the npx cache, which is pruned. gortex hit the same problem and heals
@@ -17,8 +21,8 @@
  *
  * 2. **A failed pull must not break the session.** BLUUD_CONCEPT.md section
  *    9.1 requires the agent to proceed without memory when a pull fails. A
- *    bare `bluud pull --inject` exits non-zero on a missing token or a network
- *    error, which the hook-capable tools report as a broken hook — and for the
+ *    bare `bluud pull --inject --index` exits non-zero on a missing token or a
+ *    network error, which the hook-capable tools report as a broken hook — and for the
  *    tools whose hook contract parses stdout as JSON (Gemini CLI, Cline) a
  *    non-zero exit is worse than useless. The script wrapper swallows the exit
  *    code, forwards the diagnostic to stderr, and exits 0 with empty stdout.

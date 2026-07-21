@@ -31,6 +31,13 @@ REM backslash as an escape character).
 REM
 REM An empty format substitution leaves BLUUD_FORMAT undefined — `set "VAR="`
 REM clears the variable in cmd — which is exactly what `if defined` tests below.
+REM
+REM `--index` injects the lightweight index (titles, ids, hierarchy,
+REM descriptions), never node bodies — the hook fires before there is a user
+REM request to match content against, so the agent decides what's relevant
+REM once it sees one, then loads it with `bluud pull --inject --id <uuid>`
+REM itself. This is the same default BLUUD_CLI_ARCHITECTURE.md documents for
+REM skill-mode reading; the hook only automates the first step.
 
 setlocal
 
@@ -43,9 +50,9 @@ REM without `call` — the rest of this script would never run and the shim's
 REM exit code would become the hook's, defeating the fail-open contract above.
 REM `call` also works unchanged for a real `.exe`.
 if defined BLUUD_FORMAT (
-  call "%BLUUD_BINARY%" pull --inject --format=%BLUUD_FORMAT%
+  call "%BLUUD_BINARY%" pull --inject --index --format=%BLUUD_FORMAT%
 ) else (
-  call "%BLUUD_BINARY%" pull --inject
+  call "%BLUUD_BINARY%" pull --inject --index
 )
 
 if errorlevel 1 (

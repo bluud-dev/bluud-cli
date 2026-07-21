@@ -17,10 +17,12 @@
  * Gemini CLI's SessionStart entries are flat objects (no `matcher`/nested
  * `hooks` wrapper), and — critically — the hook process must print *only* a
  * single JSON object to stdout; any stray plain text breaks Gemini's parser.
- * `bluud pull --inject --format=gemini` emits the
+ * `bluud pull --inject --index --format=gemini` emits the
  * `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}`
- * envelope instead of plain text (see `renderGeminiHookOutput` in
- * `lib/memory.ts`) to satisfy that contract.
+ * envelope (see `renderGeminiHookOutput` in `lib/memory.ts`) wrapped around
+ * the lightweight index (`renderMemoryIndex`), not the full tree, to satisfy
+ * that contract without dumping every node's body before there is a user
+ * request to judge relevance against.
  *
  * That contract is also why the entry points at a materialized hook script
  * rather than `bluud` directly: a failed pull must print nothing at all rather

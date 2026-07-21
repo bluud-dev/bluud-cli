@@ -2,7 +2,9 @@
  * Cline hook adapter.
  *
  * Writes a `TaskStart` hook script (Cline's closest analog to "SessionStart")
- * so Cline runs `bluud pull --inject --format=cline` at the start of a task.
+ * so Cline runs `bluud pull --inject --index --format=cline` at the start of
+ * a task — the lightweight index wrapped in Cline's hook envelope, never the
+ * full tree.
  *
  * Schema (verified against https://docs.cline.bot/features/hooks and
  * https://cline.ghost.io/cline-v3-36-hooks/):

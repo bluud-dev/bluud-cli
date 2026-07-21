@@ -7,6 +7,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Local `npm pack` / `npm run publish:dry-run` output
+*.tgz
+
 # Test & coverage output
 coverage/
 .nyc_output/

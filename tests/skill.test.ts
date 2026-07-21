@@ -89,4 +89,27 @@ describe("bundled SKILL.md", () => {
     expect(content.toLowerCase()).toContain("read-only");
     expect(content).toContain("~/.bluud/projects/");
   });
+
+  it("teaches index-first reading as the default, not a full-tree dump", async () => {
+    const { content } = parseFrontmatter(await readSkill());
+
+    expect(content).toContain("bluud pull --inject --index");
+    expect(content).toContain("bluud pull --inject --id");
+    // Bare `--inject` (not immediately followed by another flag on the same
+    // line) must still be documented as the explicit full-tree escape hatch,
+    // not removed — the whole point is that it stays available.
+    expect(content).toMatch(/`bluud pull --inject`(?! --)/);
+  });
+
+  it("documents --id as repeatable, for loading more than one node at once", async () => {
+    const { content } = parseFrontmatter(await readSkill());
+
+    expect(content).toContain("repeatable");
+  });
+
+  it("frames the full-tree dump as the exception, reached for only when judged necessary", async () => {
+    const { content } = parseFrontmatter(await readSkill());
+
+    expect(content.toLowerCase()).toContain("not the default");
+  });
 });

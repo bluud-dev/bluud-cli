@@ -13,12 +13,13 @@
  */
 
 import { spawn } from "node:child_process";
-import { cp, mkdir, rm, symlink, readlink, lstat, realpath } from "node:fs/promises";
+import { cp, mkdir, rm, symlink, readlink, lstat, realpath, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import { getAgentDefinition } from "./agentRegistry.js";
+import { readSkillVersion } from "./skillVersion.js";
 /**
  * The skill's identity. This must equal the `name` in the bundled
  * `SKILL.md` frontmatter: `skills` resolves `--skill <name>` against the
@@ -381,6 +382,22 @@ export async function readSymlink(path: string): Promise<string | null> {
 
 export function bundledSkillPath(): string {
   return bundledAssetPath("skill");
+}
+
+/**
+ * The version pinned into the bundled `SKILL.md` (see `skillVersion.ts`), or
+ * `null` when running from an unbuilt source checkout where `dist/skill` does
+ * not exist yet and `bundledSkillPath()` falls back to the unstamped
+ * `src/skill`. Read-only; used by `bluud doctor` to report which skill
+ * version ships with the running CLI.
+ */
+export async function bundledSkillVersion(): Promise<string | null> {
+  try {
+    const markdown = await readFile(join(bundledSkillPath(), "SKILL.md"), "utf8");
+    return readSkillVersion(markdown);
+  } catch {
+    return null;
+  }
 }
 
 /**

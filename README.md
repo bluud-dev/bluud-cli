@@ -32,7 +32,7 @@ Requires **Node.js 20 or newer**.
 
 **Identity is automatic.** Bluud identifies a project by its Git remote URL, falling back to a hash of the directory path when there's no remote. You never set a project ID by hand.
 
-**Pull happens first.** At the start of a session your agent runs `bluud pull` and loads the project's full memory tree — rules, decisions, active tasks, preferences — before your first message is even sent. On tools with lifecycle hooks (Claude Code, Codex, Gemini CLI, Antigravity, Kimi Code CLI, Cline) this is a real `SessionStart` hook Bluud writes into the tool's own config; everywhere else, the bundled skill instructs the agent to run `bluud pull --inject` itself.
+**Pull happens first.** At the start of a session your agent loads the project's memory before your first message is even sent. On tools with lifecycle hooks (Claude Code, Codex, Gemini CLI, Antigravity, Kimi Code CLI, Cline) this is a real `SessionStart` hook Bluud writes into the tool's own config, which runs `bluud pull --inject` (the full tree) automatically. Everywhere else, the bundled skill drives the CLI itself, and defaults to reading selectively rather than dumping everything: it pulls a lightweight index first (titles, descriptions, hierarchy), decides which nodes are actually relevant to what you asked, and loads only those in full — falling back to the full tree only when it judges the whole thing is genuinely needed.
 
 **Push happens when it matters.** When a conversation produces something durable — a new convention, a resolved question, a completed task — your agent sends a minimal diff back with `bluud push`. Quietly, without asking. Sessions that only produce code don't write anything. Push is always agent-directed, on every tool, because deciding *whether* something is worth remembering is a judgment call no lifecycle hook can make — only pull is mechanical enough to automate.
 
@@ -116,14 +116,16 @@ Auth: session (login required — unlike `doctor`, this command fails outright i
 Fetch the current project's memory tree. Used by the skill/hook at session start; also useful standalone.
 
 ```bash
-npx bluud pull                       # "Pulled N node(s), N bytes."
-npx bluud pull --json                # full node objects, including IDs — needed to build a push diff
-npx bluud pull --inject              # memory rendered as Markdown, for injecting into agent context
-npx bluud pull --inject --format gemini   # Gemini CLI hook-output shape
-npx bluud pull --inject --format cline    # Cline hook-output shape
+npx bluud pull                              # "Pulled N node(s), N bytes."
+npx bluud pull --json                       # full node objects, including IDs — needed to build a push diff
+npx bluud pull --inject --index             # lightweight index: id, breadcrumb, updated_at, description — no bodies
+npx bluud pull --inject --id <uuid>         # full content for one or more specific nodes (repeatable)
+npx bluud pull --inject                     # full tree, every node's body — the "load everything" escape hatch
+npx bluud pull --inject --format gemini     # Gemini CLI hook-output shape (always full tree; hooks are unchanged)
+npx bluud pull --inject --format cline      # Cline hook-output shape (always full tree; hooks are unchanged)
 ```
 
-`--format` only applies with `--inject` and only accepts `gemini` or `cline`; omit it for the default Markdown rendering used by every other tool. A quota warning (approaching the storage limit) prints to stderr regardless of format.
+`--index` and `--id` are mutually exclusive with each other and with `--format`. In skill mode (every tool without a lifecycle hook), the bundled skill's default workflow is now index-first: pull `--index`, scan titles/descriptions/hierarchy for what's relevant to the request, then pull `--id` for just those nodes. Bare `--inject` (no `--index`/`--id`) still dumps the full tree — the skill reaches for it only when it decides the whole tree is genuinely needed. `--format` only applies with plain `--inject` (full tree) and only accepts `gemini` or `cline`; those hook-driven paths are unchanged by this. A quota warning (approaching the storage limit) prints to stderr regardless of mode.
 
 Auth: project token (no session/login needed — this is what the hook/skill calls on your behalf). Tier: free.
 
@@ -309,6 +311,28 @@ npm run test:e2e   # end-to-end suite (vitest.e2e.config.ts)
 npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
 ```
+
+## Release process
+
+The package publishes to npm as **`bluud`** (`npx bluud` resolves this exact package — not `bluud-cli`, which is only this repository's name).
+
+**CI** (`.github/workflows/ci.yml`) runs on every push and pull request against `main`:
+
+- `test` — typecheck, lint, build, and the unit suite, on a `{ubuntu, windows} × {node 20, 22, 24}` matrix. Windows is load-bearing, not decorative: the installer and hook adapters branch on `process.platform` for junction-vs-symlink installs and CRLF-vs-LF scripts.
+- `format` — `prettier --check`, advisory (`continue-on-error`) until the pre-existing formatting drift it currently reports is cleaned up separately.
+- `pack` — builds, runs `npm publish --dry-run` to catch packaging regressions (a missing `files` entry, a broken `bin` path) before they ever reach the registry, verifies the bundled skill's version pin (`scripts/verify-skill-version.mjs`), then installs the packed tarball into an isolated global prefix and runs `bluud --version`/`--help` against it — the closest available proxy for "does the published artifact actually run" without publishing.
+
+**Release** (`.github/workflows/release.yml`) is `workflow_dispatch`-only — nothing publishes automatically. A maintainer picks a `patch`/`minor`/`major` bump and dispatches it by hand. The workflow then, in order: re-verifies typecheck/lint/build/test and the skill version pin, runs a pre-flight `npm publish --dry-run`, bumps the version and rebuilds (so the bundled skill is pinned to the *new* version before anything ships), pushes the version commit and its tag, publishes with `npm publish --provenance --access public`, and creates a GitHub Release. A final `verify-resolution` job polls the registry and then runs `npx bluud@latest --version`/`--help` in a clean environment — the automated form of "verify `npx bluud@latest` resolves" for every release, not just a one-time check.
+
+**One-time repo setup** (not done by either workflow — requires a maintainer with repo admin access):
+
+1. Create a `npm-publish` environment under Settings → Environments. Optionally add required reviewers for an extra manual gate beyond `workflow_dispatch`.
+2. Add an `NPM_TOKEN` secret to that environment: an npm **granular access token**, type "Automation", scoped to the `bluud` package, from [npmjs.com](https://www.npmjs.com/) → Access Tokens.
+3. `--provenance` needs no extra secret — it signs the build using the runner's GitHub OIDC token (`permissions: id-token: write`, already set in the workflow) and requires only that the repository stay public, which it is.
+
+### Skill version pinning
+
+The bundled `SKILL.md` (`src/skill/SKILL.md`) carries no hardcoded version — `package.json` is the single source of truth. `tsup.config.ts`'s `onSuccess` hook stamps `metadata.version` into `dist/skill/SKILL.md` at build time (`src/lib/skillVersion.ts`), so every published version of `bluud` ships a skill file traceably pinned to that exact release. `bluud doctor` reads the stamp back out (`bundledSkillVersion()`) and reports it under "Environment" and as `skill_version` in `--json` output, so which skill version is running is always inspectable, not just internally consistent.
 
 ## License
 

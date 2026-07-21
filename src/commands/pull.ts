@@ -1,19 +1,25 @@
 /**
  * `bluud pull` — fetch memory for the current project.
  *
- * Used by the skill/hook at session start.  With `--inject`, prints the memory
- * tree in a form suitable for loading into the agent context.
+ * Used by the skill/hook at session start. `--inject` prints memory in a form
+ * suitable for loading into agent context: `--index` for the lightweight
+ * index (default skill-mode reading), `--id` (repeatable) to load specific
+ * nodes' full content by id, or neither for the full-tree dump. Hooks always
+ * use plain `--inject` (optionally with `--format`) — index/id are a
+ * skill-mode-only addition and never combine with `--format`.
  */
 
 import { requireIdentity } from "../lib/identity.js";
 import { loadProjectToken } from "../lib/config.js";
 import { CliError } from "../lib/error.js";
-import { getFlagBoolean, getFlagString } from "../lib/args.js";
+import { getFlagBoolean, getFlagString, getFlagArray } from "../lib/args.js";
 import {
   formatQuotaWarning,
   isQuotaWarning,
   renderClineHookOutput,
   renderGeminiHookOutput,
+  renderMemoryIndex,
+  renderMemoryNodes,
   renderMemoryTree,
 } from "../lib/memory.js";
 import type { Command, CommandContext } from "./index.js";
@@ -53,7 +59,26 @@ export const pullCommand: Command = {
           { code: "config_error" },
         );
       }
-      if (format === "gemini") {
+
+      const index = getFlagBoolean(ctx.flags, "index");
+      const ids = getFlagArray(ctx.flags, "id");
+
+      if (index && ids.length > 0) {
+        throw new CliError("--index and --id cannot be combined; pick one.", {
+          code: "config_error",
+        });
+      }
+      if ((index || ids.length > 0) && format !== undefined) {
+        throw new CliError("--index/--id and --format cannot be combined; pick one.", {
+          code: "config_error",
+        });
+      }
+
+      if (index) {
+        ctx.out.writeLine(renderMemoryIndex(tree));
+      } else if (ids.length > 0) {
+        ctx.out.writeLine(renderMemoryNodes(tree, ids));
+      } else if (format === "gemini") {
         ctx.out.writeLine(renderGeminiHookOutput(tree));
       } else if (format === "cline") {
         ctx.out.writeLine(renderClineHookOutput(tree));

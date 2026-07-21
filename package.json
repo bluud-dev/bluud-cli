@@ -1,5 +1,5 @@
 {
-  "name": "bluud-cli",
+  "name": "bluud",
   "version": "0.1.0",
   "description": "Bluud — agent memory for this project. The npx bluud CLI installs the Bluud skill into your AI tools and keeps project memory in sync.",
   "type": "module",
@@ -8,13 +8,13 @@
   "homepage": "https://bluud.dev",
   "repository": {
     "type": "git",
-    "url": "https://github.com/bluud-dev/bluud-cli.git"
+    "url": "git+https://github.com/bluud-dev/bluud-cli.git"
   },
   "bugs": {
     "url": "https://github.com/bluud-dev/bluud-cli/issues"
   },
   "bin": {
-    "bluud": "./bin/cli.mjs"
+    "bluud": "bin/cli.mjs"
   },
   "files": [
     "bin",
@@ -28,14 +28,15 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests bin/cli.mjs",
-    "lint:fix": "eslint src tests bin/cli.mjs --fix",
-    "format:check": "prettier --check src tests bin/cli.mjs",
-    "format": "prettier --write src tests bin/cli.mjs",
+    "lint": "eslint src tests bin/cli.mjs scripts",
+    "lint:fix": "eslint src tests bin/cli.mjs scripts --fix",
+    "format:check": "prettier --check src tests bin/cli.mjs scripts",
+    "format": "prettier --write src tests bin/cli.mjs scripts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "publish:dry-run": "npm run build && npm publish --dry-run"
   },
   "engines": {
     "node": ">=20.0.0"

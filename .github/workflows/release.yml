@@ -1,0 +1,152 @@
+name: Release
+
+# Manual only — publishing to npm and pushing a version tag are both
+# hard-to-reverse, shared-state actions, so this never fires on a push or a
+# schedule. A maintainer with repo write access must deliberately dispatch it.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Configure this environment in the repo's Settings → Environments with
+    # the NPM_TOKEN secret (an npm "Automation" granular access token scoped
+    # to this package) before the first run. Required reviewers can be added
+    # to the environment for an extra manual gate on top of workflow_dispatch.
+    environment: npm-publish
+    permissions:
+      contents: write
+      # Required for `npm publish --provenance`: GitHub's OIDC token lets npm
+      # attach a signed build provenance attestation without any extra secret.
+      id-token: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Re-verify from scratch rather than trusting a prior CI run on this
+      # commit — the release workflow is the last gate before an irreversible
+      # publish, so it re-derives every guarantee instead of assuming one.
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Verify bundled skill version pin (pre-bump)
+        run: node scripts/verify-skill-version.mjs
+
+      # Pre-flight: validates the tarball/manifest before anything below
+      # mutates repo state or touches the registry. A failure here aborts
+      # before the version bump, the tag, or the push ever happen.
+      - name: Publish dry run (pre-flight)
+        run: npm publish --dry-run
+
+      - name: Configure git identity for the version-bump commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version
+        run: npm version ${{ inputs.bump }} -m "v%s"
+
+      # `npm version` does not rebuild — rebuild so dist/ (and the skill
+      # version stamped into it) reflects the just-bumped version before the
+      # tag is pushed or anything is published under that version number.
+      - name: Rebuild at the bumped version
+        run: npm run build
+
+      - name: Verify bundled skill version pin (post-bump)
+        run: node scripts/verify-skill-version.mjs
+
+      - name: Push version commit and tag
+        run: |
+          git push
+          git push --tags
+
+      - name: Publish to npm
+        id: publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release
+        if: steps.publish.outcome == 'success'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "v${VERSION}" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  verify-resolution:
+    name: Verify npx bluud@latest resolves
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # npm registry propagation after a publish is not instant. Retry with
+      # backoff instead of a single fixed-delay attempt, which would be either
+      # too slow (wasted CI minutes on every release) or flaky (an occasional
+      # false failure on a slow propagation).
+      - name: Poll the registry for the version just published
+        run: |
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          for attempt in $(seq 1 10); do
+            PUBLISHED=$(npm view bluud@latest version 2>/dev/null || echo "")
+            if [ "$PUBLISHED" = "$EXPECTED_VERSION" ]; then
+              echo "Registry has bluud@$PUBLISHED"
+              exit 0
+            fi
+            echo "Attempt $attempt: registry has '$PUBLISHED', waiting for $EXPECTED_VERSION..."
+            sleep 15
+          done
+          echo "::error::npm registry did not report bluud@$EXPECTED_VERSION after publish"
+          exit 1
+
+      - name: Run npx bluud@latest --version in a clean environment
+        run: |
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          ACTUAL_VERSION=$(npx --yes bluud@latest --version)
+          echo "npx bluud@latest --version: $ACTUAL_VERSION"
+          if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::npx bluud@latest resolved version $ACTUAL_VERSION, expected $EXPECTED_VERSION"
+            exit 1
+          fi
+
+      - name: Run npx bluud@latest --help in a clean environment
+        run: npx --yes bluud@latest --help

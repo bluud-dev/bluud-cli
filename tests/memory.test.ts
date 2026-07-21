@@ -5,6 +5,8 @@ import {
   isQuotaWarning,
   renderClineHookOutput,
   renderGeminiHookOutput,
+  renderMemoryIndex,
+  renderMemoryNodes,
   renderMemoryTree,
   validateDiffOperations,
 } from "../src/lib/memory.js";
@@ -166,6 +168,130 @@ describe("validateDiffOperations", () => {
     expect(() =>
       validateDiffOperations({ operations: [{ op: "create", id: "", document: "doc" }] }),
     ).toThrow("invalid 'id'");
+  });
+});
+
+describe("renderMemoryIndex", () => {
+  it("renders an empty tree", () => {
+    const output = renderMemoryIndex(makeTree());
+    expect(output).toContain("# Bluud project memory (index)");
+    expect(output).toContain("No memory has been recorded for this project yet");
+  });
+
+  it("includes id, breadcrumb, updated_at, and description but never body", () => {
+    const output = renderMemoryIndex(
+      makeTree({
+        nodes: [
+          makeNode({
+            id: "root-1",
+            title: "Architecture",
+            description: "Core rules",
+            body: "Full body text nobody should see in the index.",
+            updated_at: "2026-03-05T12:30:00Z",
+            depth: 0,
+          }),
+        ],
+      }),
+    );
+
+    expect(output).toContain("- Architecture");
+    expect(output).toContain("id: root-1");
+    expect(output).toContain("updated: 2026-03-05");
+    expect(output).toContain("Core rules");
+    expect(output).not.toContain("Full body text");
+  });
+
+  it("prefixes each entry's title with its ancestors' titles, root-first", () => {
+    const output = renderMemoryIndex(
+      makeTree({
+        nodes: [
+          makeNode({ id: "a", title: "Architecture", parent_id: null, depth: 0 }),
+          makeNode({ id: "b", title: "Boundaries", parent_id: "a", depth: 1 }),
+          makeNode({ id: "c", title: "Server/Client", parent_id: "b", depth: 2 }),
+        ],
+      }),
+    );
+
+    expect(output).toContain("- Architecture");
+    expect(output).toContain("- Architecture > Boundaries");
+    expect(output).toContain("- Architecture > Boundaries > Server/Client");
+  });
+
+  it("omits an empty description", () => {
+    const output = renderMemoryIndex(
+      makeTree({ nodes: [makeNode({ title: "Minimal", description: "" })] }),
+    );
+    expect(output).toContain("- Minimal");
+    expect(output).not.toMatch(/- Minimal\n {2}\n/);
+  });
+});
+
+describe("renderMemoryNodes", () => {
+  it("renders the requested node's full content (title, description, body)", () => {
+    const tree = makeTree({
+      nodes: [
+        makeNode({
+          id: "a",
+          title: "Rule",
+          description: "A rule",
+          body: "Full details.",
+          depth: 0,
+        }),
+      ],
+    });
+
+    const output = renderMemoryNodes(tree, ["a"]);
+
+    expect(output).toContain("## Rule");
+    expect(output).toContain("A rule");
+    expect(output).toContain("Full details.");
+  });
+
+  it("prefixes a selected node with an ancestor-title breadcrumb, titles only", () => {
+    const tree = makeTree({
+      nodes: [
+        makeNode({
+          id: "parent",
+          title: "Architecture",
+          description: "Parent description that must not leak into the breadcrumb",
+          parent_id: null,
+          depth: 0,
+        }),
+        makeNode({ id: "child", title: "Boundaries", parent_id: "parent", depth: 1 }),
+      ],
+    });
+
+    const output = renderMemoryNodes(tree, ["child"]);
+
+    expect(output).toContain("_Architecture_");
+    expect(output).toContain("## Boundaries");
+    expect(output).not.toContain("Parent description that must not leak");
+  });
+
+  it("omits the breadcrumb line entirely for a root node", () => {
+    const tree = makeTree({ nodes: [makeNode({ id: "root", title: "Root", depth: 0 })] });
+    const output = renderMemoryNodes(tree, ["root"]);
+    expect(output).not.toContain("_");
+  });
+
+  it("renders multiple requested nodes in the order ids were given, not tree order", () => {
+    const tree = makeTree({
+      nodes: [
+        makeNode({ id: "a", title: "First", depth: 0 }),
+        makeNode({ id: "b", title: "Second", depth: 0 }),
+      ],
+    });
+
+    const output = renderMemoryNodes(tree, ["b", "a"]);
+
+    expect(output.indexOf("## Second")).toBeLessThan(output.indexOf("## First"));
+  });
+
+  it("throws CliError naming the id when a requested node does not exist", () => {
+    const tree = makeTree({ nodes: [makeNode({ id: "a", title: "Only node" })] });
+
+    expect(() => renderMemoryNodes(tree, ["missing-id"])).toThrow(CliError);
+    expect(() => renderMemoryNodes(tree, ["missing-id"])).toThrow("missing-id");
   });
 });
 

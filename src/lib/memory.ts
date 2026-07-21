@@ -80,6 +80,110 @@ export function renderClineHookOutput(tree: MemoryTree): string {
 }
 
 /**
+ * Render a memory tree as a lightweight index: one entry per node with its
+ * `id`, an ancestor-title breadcrumb, `updated_at`, and `description` — never
+ * `body`. This is the default entry point for skill-mode reading: an agent
+ * scans the index, decides which nodes are relevant to the request at hand,
+ * and loads only those with `renderMemoryNodes`. `bluud pull --inject` (no
+ * `--index`) remains the unconditional full-tree dump for when an agent
+ * genuinely needs everything.
+ *
+ * Deterministic and side-effect free, like `renderMemoryTree`.
+ */
+export function renderMemoryIndex(tree: MemoryTree): string {
+  if (tree.nodes.length === 0) {
+    return "# Bluud project memory (index)\n\nNo memory has been recorded for this project yet.\n";
+  }
+
+  const byId = buildNodeIndex(tree);
+  const lines: string[] = ["# Bluud project memory (index)", ""];
+
+  for (const node of tree.nodes) {
+    lines.push(...renderIndexEntry(node, byId));
+  }
+
+  return lines.join("\n");
+}
+
+function renderIndexEntry(node: MemoryNode, byId: Map<string, MemoryNode>): string[] {
+  const breadcrumb = [...ancestorTitles(node, byId), node.title].join(" > ");
+  const lines = [
+    "",
+    `- ${breadcrumb}`,
+    `  id: ${node.id} | updated: ${formatDateOnly(node.updated_at)}`,
+  ];
+
+  if (node.description) {
+    lines.push(`  ${node.description}`);
+  }
+
+  return lines;
+}
+
+/**
+ * Render only the requested nodes' full content (title, description, body —
+ * same shape `renderMemoryTree` uses per node), each preceded by an
+ * ancestor-title breadcrumb for orientation, since a selected node is no
+ * longer surrounded by its siblings the way a full-tree dump would show it.
+ * The breadcrumb carries titles only, never ancestor bodies or descriptions —
+ * the whole point of selecting is to avoid pulling in content the agent didn't
+ * ask for.
+ *
+ * Nodes are emitted in the order `ids` was given, not tree order, so the
+ * output matches the order the agent asked for them in.
+ *
+ * Throws `CliError` (`config_error`) on the first id with no matching node,
+ * naming that id — a silent partial result would be worse than a loud, exact
+ * failure for a follow-up push that assumes every requested node loaded.
+ */
+export function renderMemoryNodes(tree: MemoryTree, ids: string[]): string {
+  const byId = buildNodeIndex(tree);
+  const lines: string[] = ["# Bluud project memory (selected)"];
+
+  for (const id of ids) {
+    const node = byId.get(id);
+    if (!node) {
+      throw new CliError(`No memory node found with id ${id}.`, { code: "config_error" });
+    }
+
+    const breadcrumb = ancestorTitles(node, byId);
+    if (breadcrumb.length > 0) {
+      lines.push("", `_${breadcrumb.join(" > ")}_`);
+    }
+    lines.push(...renderNode(node));
+  }
+
+  return lines.join("\n");
+}
+
+function buildNodeIndex(tree: MemoryTree): Map<string, MemoryNode> {
+  return new Map(tree.nodes.map((node) => [node.id, node]));
+}
+
+/**
+ * Titles of `node`'s ancestors, root-first, from `parent_id` — never the
+ * node's own title. The backend rejects any push that would introduce a
+ * parent cycle (BLUUD_PUBLIC_API.md's structural-violation check on
+ * `PATCH /memory/{project_id}`), so a pulled tree is guaranteed acyclic and
+ * this walk is guaranteed to terminate.
+ */
+function ancestorTitles(node: MemoryNode, byId: Map<string, MemoryNode>): string[] {
+  const titles: string[] = [];
+  let current = node.parent_id !== null ? byId.get(node.parent_id) : undefined;
+  while (current !== undefined) {
+    titles.unshift(current.title);
+    current = current.parent_id !== null ? byId.get(current.parent_id) : undefined;
+  }
+  return titles;
+}
+
+/** `updated_at`'s leading `YYYY-MM-DD`, or the raw string if it doesn't match. */
+function formatDateOnly(isoTimestamp: string): string {
+  const match = isoTimestamp.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : isoTimestamp;
+}
+
+/**
  * Return true when the project is near or over its quota. Pull continues to
  * work in this state, but the user (or agent) should be warned.
  */

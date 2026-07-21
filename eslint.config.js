@@ -15,12 +15,13 @@ export default tseslint.config(
     },
   },
   {
-    files: ["bin/cli.mjs"],
+    files: ["bin/cli.mjs", "scripts/*.mjs"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
       globals: {
         process: "readonly",
+        console: "readonly",
       },
     },
     rules: {

@@ -18,7 +18,7 @@ import { planAll } from "../lib/adapters/index.js";
 import type { AdapterEnv } from "../lib/adapters/types.js";
 import { detectAgents } from "../lib/detect.js";
 import { detectRunningAgent } from "../lib/runningAgent.js";
-import { isSkillInstalled } from "../lib/skills.js";
+import { isSkillInstalled, bundledSkillVersion } from "../lib/skills.js";
 import { formatBytes } from "../lib/output.js";
 import { getFlagBoolean } from "../lib/args.js";
 import { supportedAgentNames } from "../lib/agentRegistry.js";
@@ -46,10 +46,11 @@ export const doctorCommand: Command = {
     const projectToken = await loadProjectToken(identity.projectId);
     const env = buildEnv(ctx, global);
 
-    const [detected, plans, runningAgent] = await Promise.all([
+    const [detected, plans, runningAgent, skillVersion] = await Promise.all([
       detectAgents(SUPPORTED_AGENTS),
       planAll(env),
       detectRunningAgent(),
+      bundledSkillVersion(),
     ]);
     const agentReports: AgentReport[] = SUPPORTED_AGENTS.map((agent) => ({
       agent,
@@ -68,6 +69,7 @@ export const doctorCommand: Command = {
             platform: process.platform,
             running_in_agent: runningAgent.isAgent,
             running_agent: runningAgent.name,
+            skill_version: skillVersion,
             agents: agentReports,
             hooks: plans.map((p) => ({
               name: p.name,
@@ -91,6 +93,7 @@ export const doctorCommand: Command = {
     ctx.out.writeLine("");
     ctx.out.writeLine(`${pc.bold("Environment")}`);
     ctx.out.writeLine(`  platform: ${process.platform}`);
+    ctx.out.writeLine(`  skill:    ${skillVersion ?? "unbuilt (running from source)"}`);
     if (runningAgent.isAgent) {
       ctx.out.writeLine(`  session:  running inside ${runningAgent.name} — prompts suppressed`);
     } else {

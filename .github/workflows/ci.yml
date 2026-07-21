@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-latest is required, not decorative: the installer/adapter
+        # code branches on process.platform === "win32" for junction-vs-symlink
+        # installs, CRLF hook scripts, and Windows file-locking retry logic
+        # (see tests/crossPlatform.test.ts) — ubuntu alone would never exercise
+        # those paths.
+        os: [ubuntu-latest, windows-latest]
+        node-version: ["20", "22", "24"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # A hard gate, not advisory: the repo-wide CRLF/LF mismatch that used to
+      # make this check unreliable (a checkout-time artifact of core.autocrlf,
+      # not real formatting drift — see .gitattributes' header comment) is
+      # fixed at the root via the `eol=lf` default there, so a genuine failure
+      # here now always means real, actionable drift.
+      - name: Prettier
+        run: npm run format:check
+
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Catches packaging regressions (a missing "files" entry, a broken bin
+      # path) before they ever reach a real `npm publish`.
+      - name: Publish dry run
+        run: npm publish --dry-run
+
+      # The skill is pinned to the CLI's own version at build time
+      # (tsup.config.ts onSuccess, src/lib/skillVersion.ts). Verify the pin
+      # actually landed in the published artifact rather than trusting the
+      # build step silently.
+      - name: Verify bundled skill version pin
+        run: node scripts/verify-skill-version.mjs
+
+      - name: Smoke test the packed tarball
+        run: |
+          npm pack
+          TARBALL=$(ls bluud-*.tgz)
+          npm install -g "./$TARBALL"
+          ACTUAL_VERSION=$(bluud --version)
+          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          echo "bluud --version: $ACTUAL_VERSION"
+          if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "::error::Installed CLI reports version $ACTUAL_VERSION, expected $EXPECTED_VERSION"
+            exit 1
+          fi
+          bluud --help

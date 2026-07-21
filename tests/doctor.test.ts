@@ -23,19 +23,21 @@ vi.mock("../src/lib/detect.js", () => ({
 
 vi.mock("../src/lib/skills.js", () => ({
   isSkillInstalled: vi.fn(),
+  bundledSkillVersion: vi.fn(),
 }));
 
 import { requireIdentity } from "../src/lib/identity.js";
 import { loadProjectToken } from "../src/lib/config.js";
 import { planAll } from "../src/lib/adapters/index.js";
 import { detectAgents } from "../src/lib/detect.js";
-import { isSkillInstalled } from "../src/lib/skills.js";
+import { isSkillInstalled, bundledSkillVersion } from "../src/lib/skills.js";
 
 const mockedRequireIdentity = vi.mocked(requireIdentity);
 const mockedLoadProjectToken = vi.mocked(loadProjectToken);
 const mockedPlanAll = vi.mocked(planAll);
 const mockedDetectAgents = vi.mocked(detectAgents);
 const mockedIsSkillInstalled = vi.mocked(isSkillInstalled);
+const mockedBundledSkillVersion = vi.mocked(bundledSkillVersion);
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -102,6 +104,7 @@ describe("doctorCommand", () => {
       Object.fromEntries(ALL_AGENTS.map((a) => [a, a === "claude-code"])),
     );
     mockedIsSkillInstalled.mockReturnValue(false);
+    mockedBundledSkillVersion.mockResolvedValue("0.1.0");
   });
 
   afterEach(() => {
@@ -116,6 +119,23 @@ describe("doctorCommand", () => {
       .map((c) => c[0])
       .join("\n");
     expect(lines).toContain("Sign in (`bluud login`)");
+  });
+
+  it("reports the bundled skill version, or the unbuilt fallback when there is none", async () => {
+    const ctx = makeContext();
+    await doctorCommand.run(ctx);
+    const lines = (ctx.out.writeLine as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(lines).toContain("skill:    0.1.0");
+
+    mockedBundledSkillVersion.mockResolvedValue(null);
+    const ctx2 = makeContext();
+    await doctorCommand.run(ctx2);
+    const lines2 = (ctx2.out.writeLine as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => c[0])
+      .join("\n");
+    expect(lines2).toContain("skill:    unbuilt (running from source)");
   });
 
   it("reports every supported agent's detected + skill-installed state", async () => {
@@ -215,6 +235,7 @@ describe("doctorCommand", () => {
     expect(parsed.agents).toHaveLength(ALL_AGENTS.length);
     expect(parsed.hooks[0].name).toBe("claude-code");
     expect(parsed.project.role).toBe("owner");
+    expect(parsed.skill_version).toBe("0.1.0");
   });
 
   it("does not write anything regardless of --dry-run (doctor is always read-only)", async () => {

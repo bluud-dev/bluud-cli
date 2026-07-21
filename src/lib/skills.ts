@@ -14,9 +14,9 @@
 
 import { spawn } from "node:child_process";
 import { cp, mkdir, rm, symlink, readlink, lstat, realpath, readFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep, isAbsolute } from "node:path";
+import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { getAgentDefinition } from "./agentRegistry.js";
 import { readSkillVersion } from "./skillVersion.js";
@@ -426,27 +426,56 @@ function bundledAssetPath(name: string): string {
   return candidates[0] as string;
 }
 
-function findPackageRoot(): string {
-  const entry = process.argv[1];
-  if (entry) {
-    const normalized = resolve(entry);
-    // bin/cli.mjs -> package root; dist/cli.mjs -> package root.
-    if (normalized.includes(`${sep}bluud-cli${sep}`) || normalized.endsWith(`${sep}bluud-cli`)) {
-      const parts = normalized.split(sep);
-      const idx = parts.indexOf("bluud-cli");
-      if (idx !== -1) return parts.slice(0, idx + 1).join(sep);
-    }
-  }
-
-  // Fall back to walking up from this module's URL.
-  const modulePath = fileURLToPath(import.meta.url);
-  let dir = dirname(modulePath);
+/**
+ * Nearest ancestor of `startDir` (inclusive) that holds a `package.json`, or
+ * `null` if none appears within six levels.
+ */
+function findManifestDir(startDir: string): string | null {
+  let dir = startDir;
   for (let i = 0; i < 6; i++) {
-    const candidate = resolve(dir, "package.json");
-    if (existsSync(candidate)) return dir;
+    if (existsSync(resolve(dir, "package.json"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  return dirname(modulePath);
+  return null;
+}
+
+/**
+ * Whether `dir`'s manifest is Bluud's own, rather than one belonging to a host
+ * project or a tool that happens to sit above us in the tree.
+ */
+function isBluudPackage(dir: string): boolean {
+  try {
+    const manifest = JSON.parse(readFileSync(resolve(dir, "package.json"), "utf8")) as {
+      name?: unknown;
+    };
+    return manifest.name === "bluud";
+  } catch {
+    return false;
+  }
+}
+
+function findPackageRoot(): string {
+  // `argv[1]` is trusted only when walking up from it lands on Bluud's *own*
+  // manifest. Identifying the root by a path segment literally named
+  // "bluud-cli" — as this did — is wrong twice over, and both ways bite at
+  // once under CI. Under a test runner `argv[1]` is the runner's binary, not
+  // ours; and a GitHub checkout lives at `<runner>/work/bluud-cli/bluud-cli`,
+  // where an *ancestor* carries the name too, so taking the first match
+  // resolved one level above the real root and every bundled asset lookup
+  // (`dist/skill`, `dist/hooks`) missed. Reading the manifest is the only
+  // check that does not depend on what a directory happens to be called, and
+  // it keeps working for the layouts the name match was written for: a source
+  // checkout via `bin/cli.mjs`, a global install, and the volatile
+  // `_npx/<hash>/node_modules/bluud` directory an `npx` run unpacks into.
+  const entry = process.argv[1];
+  if (entry) {
+    const fromEntry = findManifestDir(dirname(resolve(entry)));
+    if (fromEntry !== null && isBluudPackage(fromEntry)) return fromEntry;
+  }
+
+  // Fall back to walking up from this module's URL.
+  const modulePath = fileURLToPath(import.meta.url);
+  return findManifestDir(dirname(modulePath)) ?? dirname(modulePath);
 }

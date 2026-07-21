@@ -136,7 +136,11 @@ describe("installCommand", () => {
     vi.clearAllMocks();
     mockedSpinner.mockReturnValue(makeSpinner());
     mockedRequireIdentity.mockResolvedValue(identity);
-    mockedInstallSkill.mockResolvedValue({ agent: "claude-code", installed: true, mode: "symlink" });
+    mockedInstallSkill.mockResolvedValue({
+      agent: "claude-code",
+      installed: true,
+      mode: "symlink",
+    });
     mockedDetectAgents.mockResolvedValue({
       "claude-code": true,
       codex: false,

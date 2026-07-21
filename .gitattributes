@@ -1,3 +1,18 @@
+# Every other text file in this repo is git-normalized to LF, matching
+# Prettier's `endOfLine: "lf"` (prettier.config.js) and Node/TS's own
+# indifference to line-ending style. Without this, a checkout on a machine
+# with `core.autocrlf=true` (a common Windows default, including this repo's
+# own local config) silently rewrites every LF blob to CRLF on disk — the
+# blobs themselves stay pure LF, but `prettier --check` then reports every
+# such file as "unformatted" purely from the line-ending mismatch, with zero
+# actual content difference. Pinning `eol=lf` here makes checkout behavior
+# identical on every machine and CI runner regardless of local autocrlf
+# settings, so that class of false-positive drift cannot recur. The two
+# overrides below remain the deliberate exceptions: they require the opposite
+# (or platform-specific) ending because an interpreter, not a formatter,
+# consumes them.
+* text=auto eol=lf
+
 # The hook-script templates are executed by an interpreter that does not
 # tolerate the wrong line endings: cmd.exe parses a `.cmd` up to each CR (an
 # LF-only file makes it run fragments of the comment block as commands), and a

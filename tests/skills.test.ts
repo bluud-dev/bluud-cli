@@ -85,9 +85,9 @@ describe("installSkill", () => {
     expect(existsSync(join(workDir, ".agents", "skills", "bluud-memory", "SKILL.md"))).toBe(true);
     // …and are reachable from the agent's own directory.
     expect(existsSync(join(workDir, ".claude", "skills", "bluud-memory", "SKILL.md"))).toBe(true);
-    expect(await readFile(join(workDir, ".claude", "skills", "bluud-memory", "SKILL.md"), "utf8")).toContain(
-      "Bluud Memory Skill",
-    );
+    expect(
+      await readFile(join(workDir, ".claude", "skills", "bluud-memory", "SKILL.md"), "utf8"),
+    ).toContain("Bluud Memory Skill");
   });
 
   it("appends -g and --copy semantics for a different agent", async () => {

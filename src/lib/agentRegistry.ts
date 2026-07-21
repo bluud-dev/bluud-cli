@@ -89,7 +89,9 @@ function packageJsonHasDependency(packageJsonPath: string, dependencyName: strin
       dependencies?: Record<string, unknown>;
       devDependencies?: Record<string, unknown>;
     };
-    return Boolean(parsed.dependencies?.[dependencyName] ?? parsed.devDependencies?.[dependencyName]);
+    return Boolean(
+      parsed.dependencies?.[dependencyName] ?? parsed.devDependencies?.[dependencyName],
+    );
   } catch {
     return false;
   }
@@ -330,8 +332,7 @@ export const AGENTS: Record<string, AgentDefinition> = {
     detect: async () => {
       const cwd = process.cwd();
       return (
-        existsSync(join(cwd, "agent")) &&
-        packageJsonHasDependency(join(cwd, "package.json"), "eve")
+        existsSync(join(cwd, "agent")) && packageJsonHasDependency(join(cwd, "package.json"), "eve")
       );
     },
   },

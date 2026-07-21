@@ -170,7 +170,10 @@ async function selectAgents(ctx: CommandContext): Promise<string[]> {
  * of drift structurally impossible: uninstall now always agrees with
  * whatever install actually did.
  */
-function skillTargets(agent: string, cwd: string): { project: string; global: string | null } | null {
+function skillTargets(
+  agent: string,
+  cwd: string,
+): { project: string; global: string | null } | null {
   const project = resolveSkillTargetDir(agent, false, cwd);
   if (!project) return null;
   const global = resolveSkillTargetDir(agent, true, cwd);

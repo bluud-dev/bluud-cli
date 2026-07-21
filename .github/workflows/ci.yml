@@ -15,7 +15,17 @@ jobs:
         # installs, CRLF hook scripts, and Windows file-locking retry logic
         # (see tests/crossPlatform.test.ts) — ubuntu alone would never exercise
         # those paths.
-        os: [ubuntu-latest, windows-latest]
+        #
+        # macos-latest earns its place for the opposite reason: darwin shares
+        # every `process.platform !== "win32"` branch with linux, so the risk it
+        # covers is not branch selection but host behaviour those branches
+        # assume. Specifically APFS being case-insensitive-but-case-preserving
+        # (a link/copy that collides only by case fails here and nowhere else)
+        # and darwin's own `npm install -g` prefix. The darwin cases in
+        # crossPlatform.test.ts stub `process.platform`, so they assert the
+        # branch is *chosen* on any host; only a real macOS runner asserts it
+        # *works*.
+        os: [ubuntu-latest, windows-latest, macos-latest]
         node-version: ["20", "22", "24"]
     runs-on: ${{ matrix.os }}
 
@@ -68,7 +78,20 @@ jobs:
         run: npm run format:check
 
   pack:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The packaging checks themselves are platform-independent, but the
+        # tarball smoke test below is not: it does a real `npm install -g` and
+        # then resolves `bluud` off PATH. That prefix differs per platform
+        # (/usr/local on the ubuntu runner, a Homebrew-rooted prefix on the
+        # macOS one), and a bin-shim that resolves on one can still fail on the
+        # other. Windows is deliberately absent: its global shim is a generated
+        # .cmd whose smoke test needs a different shell and assertions than
+        # these POSIX steps, so it belongs in its own job rather than bolted on
+        # here with `shell:` overrides.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4

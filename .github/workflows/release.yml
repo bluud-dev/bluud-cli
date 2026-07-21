@@ -107,9 +107,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   verify-resolution:
-    name: Verify npx bluud@latest resolves
+    name: Verify npx bluud@latest resolves (${{ matrix.os }})
     needs: release
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The `release` job above stays single-runner on purpose — it publishes
+        # one platform-agnostic tarball, so fanning *it* out across OSes would
+        # race three jobs to publish the same version. Platform coverage for the
+        # release belongs here instead: this job consumes what was just
+        # published and proves it installs and runs on every OS we claim to
+        # support, which is the property a user actually depends on.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -123,11 +133,19 @@ jobs:
       # backoff instead of a single fixed-delay attempt, which would be either
       # too slow (wasted CI minutes on every release) or flaky (an occasional
       # false failure on a slow propagation).
+      #
+      # `shell: bash` on every step below is load-bearing, not stylistic: the
+      # windows runner would otherwise run these as PowerShell, where `seq` and
+      # `[ ... ]` do not exist. The `tr -d '\r'` guards are load-bearing for the
+      # same reason — on windows `npm`/`bluud` are .cmd shims whose stdout is
+      # CRLF, and command substitution strips the trailing \n but leaves the \r,
+      # so a bare comparison fails against an identical-looking version string.
       - name: Poll the registry for the version just published
+        shell: bash
         run: |
-          EXPECTED_VERSION=$(node -p "require('./package.json').version")
+          EXPECTED_VERSION=$(node -p "require('./package.json').version" | tr -d '\r')
           for attempt in $(seq 1 10); do
-            PUBLISHED=$(npm view bluud@latest version 2>/dev/null || echo "")
+            PUBLISHED=$(npm view bluud@latest version 2>/dev/null | tr -d '\r' || echo "")
             if [ "$PUBLISHED" = "$EXPECTED_VERSION" ]; then
               echo "Registry has bluud@$PUBLISHED"
               exit 0
@@ -139,9 +157,10 @@ jobs:
           exit 1
 
       - name: Run npx bluud@latest --version in a clean environment
+        shell: bash
         run: |
-          EXPECTED_VERSION=$(node -p "require('./package.json').version")
-          ACTUAL_VERSION=$(npx --yes bluud@latest --version)
+          EXPECTED_VERSION=$(node -p "require('./package.json').version" | tr -d '\r')
+          ACTUAL_VERSION=$(npx --yes bluud@latest --version | tr -d '\r')
           echo "npx bluud@latest --version: $ACTUAL_VERSION"
           if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
             echo "::error::npx bluud@latest resolved version $ACTUAL_VERSION, expected $EXPECTED_VERSION"
@@ -149,4 +168,5 @@ jobs:
           fi
 
       - name: Run npx bluud@latest --help in a clean environment
+        shell: bash
         run: npx --yes bluud@latest --help

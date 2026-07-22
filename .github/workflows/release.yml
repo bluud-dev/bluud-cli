@@ -18,15 +18,19 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # Configure this environment in the repo's Settings → Environments with
-    # the NPM_TOKEN secret (an npm "Automation" granular access token scoped
-    # to this package) before the first run. Required reviewers can be added
-    # to the environment for an extra manual gate on top of workflow_dispatch.
+    # Publishes via npm **trusted publishing** (OIDC) — there is no NPM_TOKEN
+    # secret and none should be added. Before the first run, register the
+    # trusted publisher on npm (the @bluud/cli package → Settings → Trusted
+    # Publishing): provider GitHub Actions, repo bluud-dev/bluud-cli, workflow
+    # release.yml, environment npm-publish. The `npm-publish` environment on the
+    # GitHub side carries the deployment-branch restriction and required
+    # reviewer — an extra manual gate on top of workflow_dispatch.
     environment: npm-publish
     permissions:
       contents: write
-      # Required for `npm publish --provenance`: GitHub's OIDC token lets npm
-      # attach a signed build provenance attestation without any extra secret.
+      # Required for OIDC trusted publishing: GitHub mints a short-lived
+      # id-token that npm exchanges for a scoped, single-use publish credential
+      # — no stored secret — and uses to attach provenance automatically.
       id-token: write
 
     steps:
@@ -42,6 +46,13 @@ jobs:
           node-version: "22"
           cache: npm
           registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing requires npm >= 11.5.1, but the Node 22 image ships
+      # npm 10.x, so the OIDC handshake in `npm publish` below is unavailable
+      # until npm is upgraded. Pin to the 11.x line to get the feature without
+      # inheriting a future major's behaviour changes unannounced.
+      - name: Upgrade npm to a version that supports OIDC trusted publishing
+        run: npm install -g "npm@^11.5.1"
 
       - name: Install dependencies
         run: npm ci
@@ -92,11 +103,13 @@ jobs:
           git push
           git push --tags
 
-      - name: Publish to npm
+      # Trusted publishing: no NODE_AUTH_TOKEN, and no --provenance flag —
+      # npm mints the credential from the OIDC token and attaches provenance
+      # automatically. --access public is still required because the package is
+      # scoped (@bluud/cli), which defaults to restricted.
+      - name: Publish to npm (OIDC trusted publishing)
         id: publish
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       - name: Create GitHub Release
         if: steps.publish.outcome == 'success'

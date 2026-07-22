@@ -112,6 +112,16 @@ jobs:
       - name: Publish dry run at the bumped version (pre-push gate)
         run: npm publish --dry-run
 
+      # Push the version-bump commit and its tag before publishing. Order is
+      # deliberate: the dry run above has already validated the publish, so the
+      # remaining failure modes are the push itself; getting the tag onto the
+      # remote first means a successful publish is always backed by a pushed
+      # tag, and a push failure aborts before anything reaches the registry.
+      - name: Push version commit and tag
+        run: |
+          git push
+          git push --tags
+
       # Trusted publishing: no NODE_AUTH_TOKEN, and no --provenance flag —
       # npm mints the credential from the OIDC token and attaches provenance
       # automatically. --access public is still required because the package is

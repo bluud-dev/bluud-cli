@@ -21,7 +21,7 @@ Bluud stores your project's memory as a tree of plain Markdown in the cloud. The
 No install step. Run it with `npx` in any project:
 
 ```bash
-npx bluud
+npx @bluud/cli
 ```
 
 This authenticates the machine, detects the AI tools in your project, installs the memory skill into each one, and registers the project. It's the only command you ever run by hand.
@@ -54,14 +54,14 @@ Every command accepts `-h/--help`, `-v/--version`, `-V/--verbose` (debug logging
 Onboard the current directory: authenticate, detect installed AI tools, register the project, install the skill, and configure lifecycle hooks. This is what runs when you invoke `bluud` with no subcommand.
 
 ```bash
-npx bluud
-npx bluud --yes                          # accept every prompt, non-interactive
-npx bluud -a claude-code -a cursor       # only install into these tools
-npx bluud --agents-skip windsurf         # install into everything detected except this
-npx bluud --global                       # install to user-level dirs instead of the project
-npx bluud --copy                         # force file copies instead of symlinks
-npx bluud --dry-run                      # show what would change, write nothing
-npx bluud --json                         # machine-readable summary for scripts
+npx @bluud/cli
+npx @bluud/cli --yes                          # accept every prompt, non-interactive
+npx @bluud/cli -a claude-code -a cursor       # only install into these tools
+npx @bluud/cli --agents-skip windsurf         # install into everything detected except this
+npx @bluud/cli --global                       # install to user-level dirs instead of the project
+npx @bluud/cli --copy                         # force file copies instead of symlinks
+npx @bluud/cli --dry-run                      # show what would change, write nothing
+npx @bluud/cli --json                         # machine-readable summary for scripts
 ```
 
 | Flag | Effect |
@@ -82,8 +82,8 @@ Auth: browser (or `--token`). Tier: free.
 Authenticate this machine. Opens the default browser to the Bluud consent screen (OAuth 2.0 PKCE loopback) unless `--token <PAT>` is given.
 
 ```bash
-npx bluud login
-npx bluud login --token bluud_pat_...
+npx @bluud/cli login
+npx @bluud/cli login --token bluud_pat_...
 ```
 
 Non-interactive shells (`CI`, `--yes`, no TTY) must pass `--token` — there is no headless browser fallback beyond printing the authorize URL when the OS can't launch a browser.
@@ -95,7 +95,7 @@ Auth: none required to run. Tier: free.
 Revoke the current session's refresh token server-side (skipped for a personal access token, which has none to revoke) and remove `~/.bluud/auth.json`. The local file is always cleared, even if the server-side revoke call fails.
 
 ```bash
-npx bluud logout
+npx @bluud/cli logout
 ```
 
 Auth: none required. Tier: free.
@@ -105,8 +105,8 @@ Auth: none required. Tier: free.
 Show this directory's project identity, role, memory size, quota usage, and local/remote token state.
 
 ```bash
-npx bluud status
-npx bluud status --json
+npx @bluud/cli status
+npx @bluud/cli status --json
 ```
 
 Auth: session (login required — unlike `doctor`, this command fails outright if you're signed out). Tier: free.
@@ -116,14 +116,14 @@ Auth: session (login required — unlike `doctor`, this command fails outright i
 Fetch the current project's memory tree. Used by the skill/hook at session start; also useful standalone.
 
 ```bash
-npx bluud pull                                       # "Pulled N node(s), N bytes."
-npx bluud pull --json                                # full node objects, including IDs — needed to build a push diff
-npx bluud pull --inject --index                      # lightweight index: id, breadcrumb, updated_at, description — no bodies
-npx bluud pull --inject --id <uuid>                   # full content for one or more specific nodes (repeatable)
-npx bluud pull --inject                              # full tree, every node's body — the "load everything" escape hatch
-npx bluud pull --inject --index --format gemini      # index wrapped in Gemini CLI's hook envelope
-npx bluud pull --inject --index --format cline       # same, wrapped in Cline's hook envelope
-npx bluud pull --inject --index --format hermes      # same, wrapped in Hermes' envelope — and gated to the first turn
+npx @bluud/cli pull                                       # "Pulled N node(s), N bytes."
+npx @bluud/cli pull --json                                # full node objects, including IDs — needed to build a push diff
+npx @bluud/cli pull --inject --index                      # lightweight index: id, breadcrumb, updated_at, description — no bodies
+npx @bluud/cli pull --inject --id <uuid>                   # full content for one or more specific nodes (repeatable)
+npx @bluud/cli pull --inject                              # full tree, every node's body — the "load everything" escape hatch
+npx @bluud/cli pull --inject --index --format gemini      # index wrapped in Gemini CLI's hook envelope
+npx @bluud/cli pull --inject --index --format cline       # same, wrapped in Cline's hook envelope
+npx @bluud/cli pull --inject --index --format hermes      # same, wrapped in Hermes' envelope — and gated to the first turn
 ```
 
 `--index` and `--id` are mutually exclusive with each other (pick one), but each combines freely with `--format`: content selection (index / selected nodes / full tree) and envelope format (plain / gemini / cline / hermes) are independent choices. In skill mode (every tool without a lifecycle hook), the bundled skill's default workflow is index-first: pull `--index`, scan titles/descriptions/hierarchy for what's relevant to the request, then pull `--id` for just those nodes. On tools with a lifecycle hook, the hook itself runs `--inject --index` automatically — a hook fires before there's a request to judge relevance against, so it can only ever inject the index, never the full tree — and the agent still follows up with `--id` once it has an actual request to match against. Bare `--inject` (no `--index`/`--id`) still dumps the full tree either way — the exception an agent (not a hook) reaches for explicitly when it judges the whole thing is genuinely needed. `--format` only accepts `gemini`, `cline`, or `hermes`, and wraps whatever content was selected (or the full tree, if neither `--index` nor `--id` was given). `--format hermes` additionally reads Hermes' hook payload from stdin and prints an empty `{}` without contacting the API on any turn but the first — Hermes' only injection point fires before every LLM call, so the once-per-session narrowing has to happen here. A quota warning (approaching the storage limit) prints to stderr regardless of mode.
@@ -135,8 +135,8 @@ Auth: project token (no session/login needed — this is what the hook/skill cal
 Send a memory diff for the current project. Reads a JSON payload from stdin — never called with arguments.
 
 ```bash
-echo '{"operations":[{"op":"create","document":"---\ntitle: X\ndescription: Y\n---\n\nBody."}]}' | npx bluud push
-npx bluud push --json
+echo '{"operations":[{"op":"create","document":"---\ntitle: X\ndescription: Y\n---\n\nBody."}]}' | npx @bluud/cli push
+npx @bluud/cli push --json
 ```
 
 Each `operations[]` entry is `{"op": "create"|"update"|"delete", "id"?, "document"?}` — see the bundled skill (`src/skill/SKILL.md`) for the full node/frontmatter contract. A push that trips the storage quota is still committed; the project becomes read-only afterward and the CLI reports it as a warning, exit code 0 — it does not fail the agent's session. A push against an already-locked project reports the warning and does nothing, also exit code 0.
@@ -148,7 +148,7 @@ Auth: project token. Tier: free (subject to the read-only lock once quota is exc
 Re-fetch the current active project token, overwriting the local copy. Use this after a teammate rotates the token, or when the local token file was lost.
 
 ```bash
-npx bluud sync
+npx @bluud/cli sync
 ```
 
 Auth: session. Tier: paid.
@@ -158,7 +158,7 @@ Auth: session. Tier: paid.
 Invalidate the project's current token and mint a new one, storing it locally. Every other collaborator must run `bluud sync` afterward — their old token stops working immediately.
 
 ```bash
-npx bluud rotate
+npx @bluud/cli rotate
 ```
 
 Auth: session, project owner only. Tier: paid.
@@ -168,7 +168,7 @@ Auth: session, project owner only. Tier: paid.
 Attach the current directory to an existing project's identity and sync its token locally — the fix for "I cloned this repo on a new machine" or "the git remote changed."
 
 ```bash
-npx bluud relink
+npx @bluud/cli relink
 ```
 
 Auth: session, any project member. Tier: paid.
@@ -178,8 +178,8 @@ Auth: session, any project member. Tier: paid.
 Point the current directory at a *different* project you own, without changing the directory's own computed identity. Interactively prompts with your owned projects; non-interactively, pass the target project ID as the first positional argument.
 
 ```bash
-npx bluud reassign
-npx bluud reassign --yes 3f9a1c2b...
+npx @bluud/cli reassign
+npx @bluud/cli reassign --yes 3f9a1c2b...
 ```
 
 Auth: session, owner of the target project. Tier: paid.
@@ -189,9 +189,9 @@ Auth: session, owner of the target project. Tier: paid.
 Read-only diagnostic report: project identity, local token presence, detected AI tools and whether each has the skill installed, hook-adapter status per tool, and (when signed in) the same role/quota/token detail as `status`. Never writes anything — `--dry-run`/`--force` do not apply here because every check doctor performs already is one.
 
 ```bash
-npx bluud doctor
-npx bluud doctor --global
-npx bluud doctor --json
+npx @bluud/cli doctor
+npx @bluud/cli doctor --global
+npx @bluud/cli doctor --json
 ```
 
 Unlike `status`, `doctor` degrades gracefully rather than failing: it works before the project is registered and before you've signed in, reporting what it can from the local filesystem alone.
@@ -203,10 +203,10 @@ Auth: none required; enriches its output when a session is present. Tier: free.
 Remove the Bluud skill and any hook configuration from selected tools. Interactively multiselects (defaulting to all supported tools) unless `-a`/`--agents-skip` narrows the set.
 
 ```bash
-npx bluud uninstall
-npx bluud uninstall -a claude-code
-npx bluud uninstall --dry-run
-npx bluud uninstall --json
+npx @bluud/cli uninstall
+npx @bluud/cli uninstall -a claude-code
+npx @bluud/cli uninstall --dry-run
+npx @bluud/cli uninstall --json
 ```
 
 Auth: none required. Tier: free.
@@ -331,7 +331,7 @@ npm run typecheck  # tsc --noEmit
 
 ## Release process
 
-The package publishes to npm as **`bluud`** (`npx bluud` resolves this exact package — not `bluud-cli`, which is only this repository's name).
+The package publishes to npm as **`bluud`** (`npx @bluud/cli` resolves this exact package — not `bluud-cli`, which is only this repository's name).
 
 **CI** (`.github/workflows/ci.yml`) runs on every push and pull request against `main`:
 
@@ -339,7 +339,7 @@ The package publishes to npm as **`bluud`** (`npx bluud` resolves this exact pac
 - `format` — `prettier --check`, advisory (`continue-on-error`) until the pre-existing formatting drift it currently reports is cleaned up separately.
 - `pack` — builds, runs `npm publish --dry-run` to catch packaging regressions (a missing `files` entry, a broken `bin` path) before they ever reach the registry, verifies the bundled skill's version pin (`scripts/verify-skill-version.mjs`), then installs the packed tarball into an isolated global prefix and runs `bluud --version`/`--help` against it — the closest available proxy for "does the published artifact actually run" without publishing.
 
-**Release** (`.github/workflows/release.yml`) is `workflow_dispatch`-only — nothing publishes automatically. A maintainer picks a `patch`/`minor`/`major` bump and dispatches it by hand. The workflow then, in order: re-verifies typecheck/lint/build/test and the skill version pin, runs a pre-flight `npm publish --dry-run`, bumps the version and rebuilds (so the bundled skill is pinned to the *new* version before anything ships), pushes the version commit and its tag, publishes with `npm publish --provenance --access public`, and creates a GitHub Release. A final `verify-resolution` job polls the registry and then runs `npx bluud@latest --version`/`--help` in a clean environment — the automated form of "verify `npx bluud@latest` resolves" for every release, not just a one-time check.
+**Release** (`.github/workflows/release.yml`) is `workflow_dispatch`-only — nothing publishes automatically. A maintainer picks a `patch`/`minor`/`major` bump and dispatches it by hand. The workflow then, in order: re-verifies typecheck/lint/build/test and the skill version pin, runs a pre-flight `npm publish --dry-run`, bumps the version and rebuilds (so the bundled skill is pinned to the *new* version before anything ships), pushes the version commit and its tag, publishes with `npm publish --provenance --access public`, and creates a GitHub Release. A final `verify-resolution` job polls the registry and then runs `npx @bluud/cli@latest --version`/`--help` in a clean environment — the automated form of "verify `npx @bluud/cli@latest` resolves" for every release, not just a one-time check.
 
 **One-time repo setup** (not done by either workflow — requires a maintainer with repo admin access):
 

@@ -9,7 +9,7 @@
  * constraints make a plain inline command the wrong thing to store in a
  * tool's config:
  *
- * 1. **The `bluud` path is volatile.** Under `npx bluud` the executable lives
+ * 1. **The `bluud` path is volatile.** Under `npx @bluud/cli` the executable lives
  *    in the npx cache, which is pruned. gortex hit the same problem and heals
  *    it after the fact (`HookCommandPathIsEphemeral` in
  *    `internal/agents/claudecode/hooks.go` rewrites hook entries whose binary

@@ -92,7 +92,7 @@ describe("detectRunningAgent", () => {
 
 describe("detectRunningAgent — Cursor refinement", () => {
   it("ignores a bare CURSOR_TRACE_ID, which Cursor also sets in its human terminal", async () => {
-    // Without this refinement a developer typing `npx bluud` in Cursor's
+    // Without this refinement a developer typing `npx @bluud/cli` in Cursor's
     // integrated terminal would silently lose every prompt.
     process.env.CURSOR_TRACE_ID = "trace-abc";
     mockedDetermineAgent.mockResolvedValue(agentResult("cursor"));

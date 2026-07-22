@@ -107,7 +107,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   verify-resolution:
-    name: Verify npx bluud@latest resolves (${{ matrix.os }})
+    name: Verify npx @bluud/cli@latest resolves (${{ matrix.os }})
     needs: release
     strategy:
       fail-fast: false
@@ -140,33 +140,37 @@ jobs:
       # same reason — on windows `npm`/`bluud` are .cmd shims whose stdout is
       # CRLF, and command substitution strips the trailing \n but leaves the \r,
       # so a bare comparison fails against an identical-looking version string.
+      #
+      # The package is scoped (`@bluud/cli`) but its bin is `bluud`, so
+      # `npx @bluud/cli <args>` runs the `bluud` binary — the resolution a real
+      # user performs.
       - name: Poll the registry for the version just published
         shell: bash
         run: |
           EXPECTED_VERSION=$(node -p "require('./package.json').version" | tr -d '\r')
           for attempt in $(seq 1 10); do
-            PUBLISHED=$(npm view bluud@latest version 2>/dev/null | tr -d '\r' || echo "")
+            PUBLISHED=$(npm view @bluud/cli@latest version 2>/dev/null | tr -d '\r' || echo "")
             if [ "$PUBLISHED" = "$EXPECTED_VERSION" ]; then
-              echo "Registry has bluud@$PUBLISHED"
+              echo "Registry has @bluud/cli@$PUBLISHED"
               exit 0
             fi
             echo "Attempt $attempt: registry has '$PUBLISHED', waiting for $EXPECTED_VERSION..."
             sleep 15
           done
-          echo "::error::npm registry did not report bluud@$EXPECTED_VERSION after publish"
+          echo "::error::npm registry did not report @bluud/cli@$EXPECTED_VERSION after publish"
           exit 1
 
-      - name: Run npx bluud@latest --version in a clean environment
+      - name: Run npx @bluud/cli@latest --version in a clean environment
         shell: bash
         run: |
           EXPECTED_VERSION=$(node -p "require('./package.json').version" | tr -d '\r')
-          ACTUAL_VERSION=$(npx --yes bluud@latest --version | tr -d '\r')
-          echo "npx bluud@latest --version: $ACTUAL_VERSION"
+          ACTUAL_VERSION=$(npx --yes @bluud/cli@latest --version | tr -d '\r')
+          echo "npx @bluud/cli@latest --version: $ACTUAL_VERSION"
           if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "::error::npx bluud@latest resolved version $ACTUAL_VERSION, expected $EXPECTED_VERSION"
+            echo "::error::npx @bluud/cli@latest resolved version $ACTUAL_VERSION, expected $EXPECTED_VERSION"
             exit 1
           fi
 
-      - name: Run npx bluud@latest --help in a clean environment
+      - name: Run npx @bluud/cli@latest --help in a clean environment
         shell: bash
-        run: npx --yes bluud@latest --help
+        run: npx --yes @bluud/cli@latest --help

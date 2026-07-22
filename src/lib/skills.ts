@@ -450,7 +450,7 @@ function isBluudPackage(dir: string): boolean {
     const manifest = JSON.parse(readFileSync(resolve(dir, "package.json"), "utf8")) as {
       name?: unknown;
     };
-    return manifest.name === "bluud";
+    return manifest.name === "@bluud/cli";
   } catch {
     return false;
   }
@@ -468,7 +468,7 @@ function findPackageRoot(): string {
   // check that does not depend on what a directory happens to be called, and
   // it keeps working for the layouts the name match was written for: a source
   // checkout via `bin/cli.mjs`, a global install, and the volatile
-  // `_npx/<hash>/node_modules/bluud` directory an `npx` run unpacks into.
+  // `_npx/<hash>/node_modules/@bluud/cli` directory an `npx` run unpacks into.
   const entry = process.argv[1];
   if (entry) {
     const fromEntry = findManifestDir(dirname(resolve(entry)));

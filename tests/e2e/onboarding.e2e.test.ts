@@ -3,7 +3,7 @@
  *
  * Unlike every other suite under `tests/`, this one makes real HTTP calls to a
  * running Bluud backend instead of mocking `fetch`. It exercises the exact
- * path `npx bluud` walks a brand-new user through:
+ * path `npx @bluud/cli` walks a brand-new user through:
  *
  *   1. Sign in (here: the permanent dev/test account, via email+password —
  *      see CLAUDE.md "Development Test Account").

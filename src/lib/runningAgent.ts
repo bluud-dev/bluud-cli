@@ -56,7 +56,7 @@ const OVERRIDE_ENV = "BLUUD_AGENT";
  * set, but Cursor exports that variable into its *integrated terminal* for
  * ordinary human sessions too (verified in the package's own detection order:
  * the `CURSOR_TRACE_ID` branch precedes the `CURSOR_AGENT` branch). Treating it
- * as an agent would silently strip prompts from a developer typing `npx bluud`
+ * as an agent would silently strip prompts from a developer typing `npx @bluud/cli`
  * in Cursor's terminal — the exact interactive case Bluud most wants to serve.
  *
  * `skills/src/detect-agent.ts` hit this and requires a stronger signal before

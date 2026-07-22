@@ -33,6 +33,13 @@ jobs:
       # — no stored secret — and uses to attach provenance automatically.
       id-token: write
 
+    # The version this run actually published. `verify-resolution` must not
+    # re-derive it from a checkout: its checkout resolves to the commit that
+    # triggered the dispatch, which is the *pre-bump* tree, so it would compare
+    # the old version against a registry that now holds the new one.
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -92,7 +99,10 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Bump version
-        run: npm version ${{ inputs.bump }} -m "v%s"
+        id: bump
+        run: |
+          npm version ${{ inputs.bump }} -m "v%s"
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
       # `npm version` does not rebuild — rebuild so dist/ (and the skill
       # version stamped into it) reflects the just-bumped version before the
@@ -132,11 +142,10 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.publish.outcome == 'success'
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          gh release create "v${VERSION}" --generate-notes
+        run: gh release create "v${VERSION}" --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
 
   verify-resolution:
     name: Verify npx @bluud/cli@latest resolves (${{ matrix.os }})
@@ -152,14 +161,29 @@ jobs:
         # support, which is the property a user actually depends on.
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # No checkout on purpose. This job needs exactly one fact from the repo —
+    # the version that was published — and it takes it from the release job's
+    # output. Reading it from a checkout is what broke this job before: a
+    # checkout here resolves to the commit that triggered the dispatch, i.e.
+    # the tree *before* the version bump, so it polled for the previous version
+    # forever while the registry served the new one. Nothing else here touches
+    # the repo; everything is resolved from the registry, as a user would.
+    env:
+      EXPECTED_VERSION: ${{ needs.release.outputs.version }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+
+      - name: Guard against an empty version output
+        shell: bash
+        run: |
+          if [ -z "$EXPECTED_VERSION" ]; then
+            echo "::error::release job produced no version output; refusing to verify against an empty string"
+            exit 1
+          fi
+          echo "Verifying @bluud/cli@$EXPECTED_VERSION"
 
       # npm registry propagation after a publish is not instant. Retry with
       # backoff instead of a single fixed-delay attempt, which would be either
@@ -179,7 +203,6 @@ jobs:
       - name: Poll the registry for the version just published
         shell: bash
         run: |
-          EXPECTED_VERSION=$(node -p "require('./package.json').version" | tr -d '\r')
           for attempt in $(seq 1 10); do
             PUBLISHED=$(npm view @bluud/cli@latest version 2>/dev/null | tr -d '\r' || echo "")
             if [ "$PUBLISHED" = "$EXPECTED_VERSION" ]; then
@@ -195,7 +218,6 @@ jobs:
       - name: Run npx @bluud/cli@latest --version in a clean environment
         shell: bash
         run: |
-          EXPECTED_VERSION=$(node -p "require('./package.json').version" | tr -d '\r')
           ACTUAL_VERSION=$(npx --yes @bluud/cli@latest --version | tr -d '\r')
           echo "npx @bluud/cli@latest --version: $ACTUAL_VERSION"
           if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ]; then

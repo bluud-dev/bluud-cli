@@ -1,6 +1,6 @@
 {
   "name": "@bluud/cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Bluud — agent memory for this project. The npx @bluud/cli CLI installs the Bluud skill into your AI tools and keeps project memory in sync.",
   "type": "module",
   "license": "MIT",

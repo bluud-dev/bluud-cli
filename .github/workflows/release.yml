@@ -75,11 +75,16 @@ jobs:
       - name: Verify bundled skill version pin (pre-bump)
         run: node scripts/verify-skill-version.mjs
 
-      # Pre-flight: validates the tarball/manifest before anything below
-      # mutates repo state or touches the registry. A failure here aborts
-      # before the version bump, the tag, or the push ever happen.
-      - name: Publish dry run (pre-flight)
-        run: npm publish --dry-run
+      # Pre-flight: validates that the tarball packs and the manifest is sane
+      # before anything below mutates repo state. `npm pack`, not `npm publish
+      # --dry-run`, on purpose: this runs at the *current* (already-published)
+      # version, and a publish dry-run performs a registry collision check that
+      # always fails here once any version exists ("cannot publish over
+      # previously published versions"). Packing has no such check, so it
+      # catches a broken tarball/manifest without a false collision. The real
+      # publish is validated at the bumped version further down.
+      - name: Pack dry run (pre-flight)
+        run: npm pack --dry-run
 
       - name: Configure git identity for the version-bump commit
         run: |
@@ -98,10 +103,14 @@ jobs:
       - name: Verify bundled skill version pin (post-bump)
         run: node scripts/verify-skill-version.mjs
 
-      - name: Push version commit and tag
-        run: |
-          git push
-          git push --tags
+      # The real publish validation, at the just-bumped version — which does not
+      # exist on the registry yet, so the collision check passes and this
+      # exercises the actual tarball that will be published. Placed before the
+      # push so a publish problem aborts the run without leaving a pushed tag
+      # for a version that never shipped. No token/OIDC is needed: a dry run
+      # only reads public registry metadata, it does not authenticate.
+      - name: Publish dry run at the bumped version (pre-push gate)
+        run: npm publish --dry-run
 
       # Trusted publishing: no NODE_AUTH_TOKEN, and no --provenance flag —
       # npm mints the credential from the OIDC token and attaches provenance

@@ -8,10 +8,10 @@
   "homepage": "https://bluud.dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/bluud-dev/bluud-cli.git"
+    "url": "git+https://github.com/bluud-dev/cli.git"
   },
   "bugs": {
-    "url": "https://github.com/bluud-dev/bluud-cli/issues"
+    "url": "https://github.com/bluud-dev/cli/issues"
   },
   "bin": {
     "bluud": "bin/cli.mjs"

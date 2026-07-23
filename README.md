@@ -331,7 +331,7 @@ npm run typecheck  # tsc --noEmit
 
 ## Release process
 
-The package publishes to npm as **`bluud`** (`npx @bluud/cli` resolves this exact package — not `bluud-cli`, which is only this repository's name).
+The package publishes to npm as **`bluud`** (`npx @bluud/cli` resolves this exact package — not `cli`, which is only this repository's name).
 
 **CI** (`.github/workflows/ci.yml`) runs on every push and pull request against `main`:
 

@@ -21,7 +21,7 @@ jobs:
     # Publishes via npm **trusted publishing** (OIDC) — there is no NPM_TOKEN
     # secret and none should be added. Before the first run, register the
     # trusted publisher on npm (the @bluud/cli package → Settings → Trusted
-    # Publishing): provider GitHub Actions, repo bluud-dev/bluud-cli, workflow
+    # Publishing): provider GitHub Actions, repo bluud-dev/cli, workflow
     # release.yml, environment npm-publish. The `npm-publish` environment on the
     # GitHub side carries the deployment-branch restriction and required
     # reviewer — an extra manual gate on top of workflow_dispatch.
